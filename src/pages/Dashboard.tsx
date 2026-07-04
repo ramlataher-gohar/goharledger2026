@@ -241,10 +241,10 @@ export default function Dashboard() {
       let mpesaAdvance = 0, cashAdvance = 0, bankAdvance = 0;
       let todaySales = 0, todayProfit = 0;
       let monthSales = 0, monthProfit = 0, monthGrossProfit = 0;
-      let monthShopExpenses = 0, monthHomeExpenses = 0, monthPartnerDraws = 0;
+      let monthShopExpenses = 0, monthHomeExpenses = 0, monthPartnerDraws = 0, monthLoanPayments = 0;
       let monthSupplierPayments = 0, monthCustomerCollections = 0;
       let totalSales = 0, totalProfit = 0, totalGrossProfit = 0;
-      let totalShopExpenses = 0, totalHomeExpenses = 0, totalPartnerDraws = 0;
+      let totalShopExpenses = 0, totalHomeExpenses = 0, totalPartnerDraws = 0, totalLoanPayments = 0;
       let totalSupplierPayments = 0, totalCustomerCollections = 0;
 
       const splitMap = new Map<string, { mode: string; amount: number }[]>();
@@ -369,6 +369,11 @@ export default function Dashboard() {
           if (isMonth) monthPartnerDraws += t.amount;
         }
 
+        if (t.type === 'loan_payment') {
+          totalLoanPayments += t.amount;
+          if (isMonth) monthLoanPayments += t.amount;
+        }
+
         if (t.type === 'supplier_payment') {
           totalSupplierPayments += t.amount;
           if (isMonth) monthSupplierPayments += t.amount;
@@ -410,8 +415,8 @@ export default function Dashboard() {
       });
 
       const totalSuppliersOwed = (suppData || []).reduce((sum, s) => sum + (s.balance || 0), 0);
-      const totalNetProfit = totalGrossProfit - totalShopExpenses - totalHomeExpenses - totalPartnerDraws;
-      const monthNetProfit = monthGrossProfit - monthShopExpenses - monthHomeExpenses - monthPartnerDraws;
+      const totalNetProfit = totalGrossProfit - totalShopExpenses - totalHomeExpenses - totalPartnerDraws - totalLoanPayments;
+      const monthNetProfit = monthGrossProfit - monthShopExpenses - monthHomeExpenses - monthPartnerDraws - monthLoanPayments;
       const totalCapitalVal = (capitalData || []).reduce((sum, c) => sum + (c.amount || 0), 0);
 
       setStats({
@@ -430,6 +435,7 @@ export default function Dashboard() {
         monthShopExpenses,
         monthHomeExpenses,
         monthPartnerDraws,
+        monthLoanPayments,
         monthSupplierPayments,
         monthCustomerCollections,
         totalSuppliersOwed,
@@ -442,6 +448,7 @@ export default function Dashboard() {
         totalShopExpenses,
         totalHomeExpenses,
         totalPartnerDraws,
+        totalLoanPayments,
         totalSupplierPayments,
         totalCustomerCollections,
         totalGrossProfit,

@@ -270,7 +270,7 @@ export default function Reports() {
     });
 
     const grossProfit = salesTotal - costTotal - commissionTotal;
-    const netProfit = grossProfit - shopExpenseTotal - homeExpenseTotal - partnerDrawTotal;
+    const netProfit = grossProfit - shopExpenseTotal - homeExpenseTotal - partnerDrawTotal - loanPaymentTotal;
 
     return {
       totalIn,
@@ -535,10 +535,11 @@ export default function Reports() {
         <SummaryCard title="Net Profit" amount={summary.netProfit} color="text-emerald-600" />
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <SummaryCard title="Shop Expenses" amount={summary.shopExpenseTotal} color="text-red-600" />
         <SummaryCard title="Home Expenses" amount={summary.homeExpenseTotal} color="text-orange-600" />
         <SummaryCard title="Partner Draws" amount={summary.partnerDrawTotal} color="text-purple-600" />
+        <SummaryCard title="Loan Repayments" amount={summary.loanPaymentTotal} color="text-orange-600" />
         <SummaryCard title="Supplier Payments" amount={summary.supplierPaymentTotal} color="text-amber-600" />
       </div>
 

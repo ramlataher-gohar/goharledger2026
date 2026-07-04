@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Building2,
@@ -64,6 +64,7 @@ export default function Settings() {
 }
 
 function BusinessProfile() {
+  const [profileId, setProfileId] = useState<string | null>(null);
   const [form, setForm] = useState({
     businessName: 'Gohar Records',
     address: '',
@@ -71,6 +72,43 @@ function BusinessProfile() {
     email: '',
     currency: 'KES',
   });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    supabase.from('business_profile').select('*').limit(1).maybeSingle().then(({ data }) => {
+      if (data) {
+        setProfileId(data.id);
+        setForm({
+          businessName: data.business_name || 'Gohar Records',
+          address: data.address || '',
+          phone: data.phone || '',
+          email: data.email || '',
+          currency: data.currency || 'KES',
+        });
+      }
+    });
+  }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    const payload = {
+      business_name: form.businessName,
+      address: form.address || null,
+      phone: form.phone || null,
+      email: form.email || null,
+      currency: form.currency,
+    };
+    if (profileId) {
+      await supabase.from('business_profile').update(payload).eq('id', profileId);
+    } else {
+      const { data } = await supabase.from('business_profile').insert(payload).select().single();
+      if (data) setProfileId(data.id);
+    }
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
 
   return (
     <div className="space-y-4">
@@ -82,7 +120,12 @@ function BusinessProfile() {
         <div><label className="block text-sm font-medium text-slate-700 mb-1">Currency</label><select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"><option value="KES">KES (Kenyan Shilling)</option></select></div>
       </div>
       <div><label className="block text-sm font-medium text-slate-700 mb-1">Address</label><textarea value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} rows={2} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" /></div>
-      <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center gap-2"><Save size={16} /> Save Profile</button>
+      <div className="flex items-center gap-3">
+        <button onClick={handleSave} disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50">
+          <Save size={16} /> {saving ? 'Saving...' : 'Save Profile'}
+        </button>
+        {saved && <span className="text-sm text-emerald-600">Saved</span>}
+      </div>
     </div>
   );
 }

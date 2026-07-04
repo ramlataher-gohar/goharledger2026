@@ -102,7 +102,11 @@ export default function ProfitLoss() {
       .filter((t) => t.type === 'expense' && t.category === 'home_expense' && t.notes?.includes('From Shop'))
       .reduce((s, t) => s + t.amount, 0);
 
-    const netProfit = grossProfit - shopExpenses - homeExpensesFromShop;
+    const loanPayments = monthTxns
+      .filter((t) => t.type === 'loan_payment')
+      .reduce((s, t) => s + t.amount, 0);
+
+    const netProfit = grossProfit - shopExpenses - homeExpensesFromShop - loanPayments;
 
     // Get active rules for this month
     const activeRule = shareRules.find((r) => r.partner_id === 'taher' && r.is_active);
@@ -129,6 +133,7 @@ export default function ProfitLoss() {
       grossProfit,
       shopExpenses,
       homeExpensesFromShop,
+      loanPayments,
       netProfit,
       taherShare,
       abdulqadirShare,
@@ -203,6 +208,7 @@ export default function ProfitLoss() {
           <WaterfallRow label="= Gross Profit" value={data.grossProfit} indent={0} bold highlight />
           <WaterfallRow label="Shop Expenses" value={-data.shopExpenses} indent={1} negative />
           <WaterfallRow label="Home Expenses (from Shop)" value={-data.homeExpensesFromShop} indent={1} negative />
+          <WaterfallRow label="Loan Repayments" value={-data.loanPayments} indent={1} negative />
           <WaterfallRow label="= Net Profit" value={data.netProfit} indent={0} bold highlight />
           <WaterfallRow label={`Taher Share (${data.ruleType === 'fixed' ? 'Fixed' : data.taherVal + '%'})`} value={-data.taherShare} indent={1} negative />
           <WaterfallRow label={`Abdulqadir Share (${data.ruleType === 'fixed' ? 'Fixed' : data.abdulVal + '%'})`} value={-data.abdulqadirShare} indent={1} negative />
