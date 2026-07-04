@@ -181,6 +181,7 @@ export default function LedgerModal({
     await supabase.from('transactions').update({
       amount: parseFloat(editForm.amount),
       notes: editForm.notes || null,
+      edited_at: new Date().toISOString(),
     }).eq('id', editingEntry);
 
     setEditingEntry(null);
@@ -304,7 +305,14 @@ export default function LedgerModal({
                       </span>
                     </td>
                     <td className="px-3 py-2 text-slate-600 text-xs">{getEntityName(e)}</td>
-                    <td className="px-3 py-2 text-slate-700">{e.description || '-'}</td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {e.description || '-'}
+                      {e.edited_at && (
+                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Edited ${formatDate(e.edited_at)}`}>
+                          Edited
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-slate-600 text-xs">{getModeDisplay(e)}</td>
                     {editingEntry === e.id ? (
                       <td className="px-3 py-2">

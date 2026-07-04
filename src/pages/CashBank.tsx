@@ -10,7 +10,7 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
-import { formatKES, formatDate } from '../utils/format';
+import { formatKES, formatDate, todayStr } from '../utils/format';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -292,7 +292,7 @@ export default function CashBank() {
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={() => { setShowTransfer(true); setTransferForm(emptyTransfer); }}
+          onClick={() => { setShowTransfer(true); setTransferForm({ ...emptyTransfer, date: todayStr() }); }}
           className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
         >
           <ArrowLeftRight size={16} /> Fund Transfer

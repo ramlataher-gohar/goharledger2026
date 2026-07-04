@@ -1,3 +1,7 @@
+export function todayStr(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
 export function formatKES(amount: number | null | undefined): string {
   if (amount === null || amount === undefined) return '0';
   return amount.toLocaleString('en-KE', {

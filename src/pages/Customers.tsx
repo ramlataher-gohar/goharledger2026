@@ -12,7 +12,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
-import { formatKES, formatDate } from '../utils/format';
+import { formatKES, formatDate, todayStr } from '../utils/format';
+import { adjustCustomerCredit, adjustCustomerAdvance } from '../utils/balances';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -168,8 +169,7 @@ export default function Customers() {
       created_by: user?.username || null,
     });
 
-    const newCredit = Math.max(0, (selectedCustomer.credit_balance || 0) - amt);
-    await supabase.from('customers').update({ credit_balance: newCredit }).eq('id', selectedCustomer.id);
+    await adjustCustomerCredit(selectedCustomer.id, -amt);
 
     setPaymentForm(emptyPayment);
     setShowPayment(false);
@@ -207,8 +207,7 @@ export default function Customers() {
       created_by: user?.username || null,
     });
 
-    const newAdvance = (selectedCustomer.advance_balance || 0) + amt;
-    await supabase.from('customers').update({ advance_balance: newAdvance }).eq('id', selectedCustomer.id);
+    await adjustCustomerAdvance(selectedCustomer.id, amt);
 
     setPaymentForm(emptyPayment);
     setShowPayment(false);
@@ -462,13 +461,13 @@ export default function Customers() {
                     <Trash2 size={14} className="text-red-500" />
                   </button>
                   <button
-                    onClick={() => { setShowPayment(true); setPaymentForm({ ...emptyPayment, paymentType: 'credit' }); }}
+                    onClick={() => { setShowPayment(true); setPaymentForm({ ...emptyPayment, date: todayStr(), paymentType: 'credit' }); }}
                     className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium"
                   >
                     Add Payment
                   </button>
                   <button
-                    onClick={() => { setShowPayment(true); setPaymentForm({ ...emptyPayment, paymentType: 'advance' }); }}
+                    onClick={() => { setShowPayment(true); setPaymentForm({ ...emptyPayment, date: todayStr(), paymentType: 'advance' }); }}
                     className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium"
                   >
                     Add Advance
@@ -551,7 +550,14 @@ export default function Customers() {
                             </span>
                           </td>
                           <td className="px-3 py-2 text-slate-600 text-xs capitalize">{t.primary_mode || '-'}</td>
-                          <td className="px-3 py-2 text-slate-700">{t.notes || t.description || '-'}</td>
+                          <td className="px-3 py-2 text-slate-700">
+                            {t.notes || t.description || '-'}
+                            {t.edited_at && (
+                              <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Edited ${formatDate(t.edited_at)}`}>
+                                Edited
+                              </span>
+                            )}
+                          </td>
                           <td className={`px-3 py-2 text-right font-medium ${
                             t.type === 'sale' ? 'text-emerald-600' : 'text-blue-600'
                           }`}>

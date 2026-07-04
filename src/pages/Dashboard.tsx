@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   TrendingUp,
@@ -85,9 +85,6 @@ export default function Dashboard() {
   const [capitalTo, setCapitalTo] = useState('');
   const [monthlyCapital, setMonthlyCapital] = useState<MonthlyCapital | null>(null);
 
-  // Notification sound ref
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
   useEffect(() => {
     fetchDashboardData();
   }, [monthFilter, refreshKey]);
@@ -103,48 +100,6 @@ export default function Dashboard() {
       calculateMonthlyCapital();
     }
   }, [capitalDateFilter, capitalFrom, capitalTo, refreshKey]);
-
-  // Browser notification check
-  useEffect(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
-    }
-  }, []);
-
-  // Check for due reminders on load and every minute
-  useEffect(() => {
-    const checkReminders = () => {
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const due = reminders.filter((r) => {
-        const reminderDate = new Date(r.reminder_date);
-        const reminderTime = r.reminder_time || '09:00';
-        const [hours, minutes] = reminderTime.split(':').map(Number);
-        reminderDate.setHours(hours, minutes, 0, 0);
-        return reminderDate <= now && r.status === 'pending';
-      });
-      if (due.length > 0 && Notification.permission === 'granted') {
-        due.forEach((r) => {
-          const entity = r.entity_type === 'supplier'
-            ? suppliers.find((s) => s.id === r.entity_id)
-            : customers.find((c) => c.id === r.entity_id);
-          new Notification(`Payment Reminder: ${r.reminder_type === 'supplier_payment' ? 'Pay' : 'Collect from'} ${entity?.name || 'Unknown'}`, {
-            body: `Amount: KES ${formatKES(r.amount || 0)}\nDue: ${formatDate(r.due_date)}`,
-            icon: '/favicon.ico',
-            tag: r.id, // Prevents duplicate notifications
-          });
-        });
-        // Play sound
-        if (audioRef.current) {
-          audioRef.current.play().catch(() => {});
-        }
-      }
-    };
-
-    checkReminders();
-    const interval = setInterval(checkReminders, 60000); // Check every minute
-    return () => clearInterval(interval);
-  }, [reminders, suppliers, customers]);
 
   function updateDateRange(filter: DateFilterType, setFrom: (v: string) => void, setTo: (v: string) => void) {
     const today = new Date();
@@ -581,9 +536,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Hidden audio for notification sound */}
-      <audio ref={audioRef} src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2LkZeYl5aSjIR8eXp5e3uBh4yRk5aXl5aTkI2HgH17e3t7fISLkpWYl5eWko6IhIJ8e3t8fYOKkJWYmJiWko6JhYOBfHt8fYGHjZGXmJiWk46JhoSDgX18fX6Ch4yRlpiYlpKOiYWEg4F9fX5/gYaMkZaYmJaSjomFhIOBf39/gIGGjJGXmJeWko6JhYSDgYB/f4CCRoyRlpiXlpKOioWEg4GAf3+AgYaOkZSYl5aSjYqFhIOBf4CAgYSMkZSYl5aTjomFhIOCf4CBgYaNkZSXl5aTjomGhIOCf4CBgoiQlJeXlpOOioWEg4J/gIGChoyRlJeWlZOQi4WEg4J/gICCgoeOkpSWlpSSkIuGhIOCf4GCg4ePkpSVlZSQjouGhIOCgIGCg4ePkpOTkpKQjouGhIOCgIGChA==" />
-
       {/* Cash in Hand - TOP */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <button onClick={() => navigate('/cash-bank')} className="text-left">

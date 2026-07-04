@@ -49,6 +49,7 @@ export interface Transaction {
   is_unclassified: boolean;
   created_by: string | null;
   created_at: string;
+  edited_at: string | null;
 }
 
 export interface TransactionSplit {

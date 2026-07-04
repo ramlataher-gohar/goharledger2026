@@ -12,7 +12,8 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
-import { formatKES, formatDate } from '../utils/format';
+import { formatKES, formatDate, todayStr } from '../utils/format';
+import { adjustSupplierBalance, adjustLoanBalance } from '../utils/balances';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -159,7 +160,7 @@ export default function Expenses() {
         notes: form.notes || null,
         created_by: user?.username || null,
       });
-      await supabase.from('suppliers').update({ balance: Math.max(0, (supp.balance || 0) - amt) }).eq('id', form.supplierId);
+      await adjustSupplierBalance(form.supplierId, -amt);
       setForm(emptyForm);
       setShowAdd(false);
       fetchData();
@@ -185,9 +186,7 @@ export default function Expenses() {
         created_by: user?.username || null,
       });
       // Update loan balance
-      const newBal = Math.max(0, (loan.remaining_balance || 0) - amt);
-      const newPaid = (loan.amount_paid || 0) + amt;
-      await supabase.from('loan_trackers').update({ remaining_balance: newBal, amount_paid: newPaid, status: newBal <= 0 ? 'settled' : 'active' }).eq('id', form.loanId);
+      await adjustLoanBalance(form.loanId, amt);
       await supabase.from('loan_payments').insert({
         loan_id: form.loanId,
         date: form.date,
@@ -230,19 +229,14 @@ export default function Expenses() {
 
     // Update supplier balance
     if (form.supplierId && (category === 'supplier_payment' || category === 'stock')) {
-      const supp = suppliers.find((s) => s.id === form.supplierId);
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: Math.max(0, (supp.balance || 0) - amt) }).eq('id', form.supplierId);
-      }
+      await adjustSupplierBalance(form.supplierId, -amt);
     }
 
     // Update loan balance
     if (form.loanId) {
       const loan = loans.find((l) => l.id === form.loanId);
       if (loan) {
-        const newBal = Math.max(0, (loan.remaining_balance || 0) - amt);
-        const newPaid = (loan.amount_paid || 0) + amt;
-        await supabase.from('loan_trackers').update({ remaining_balance: newBal, amount_paid: newPaid, status: newBal <= 0 ? 'settled' : 'active' }).eq('id', form.loanId);
+        await adjustLoanBalance(form.loanId, amt);
         await supabase.from('loan_payments').insert({
           loan_id: form.loanId,
           date: form.date,
@@ -265,20 +259,12 @@ export default function Expenses() {
 
     // Reverse supplier balance
     if (txn.supplier_id && (txn.category === 'supplier_payment' || txn.category === 'stock')) {
-      const supp = suppliers.find((s) => s.id === txn.supplier_id);
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: (supp.balance || 0) + (txn.amount || 0) }).eq('id', txn.supplier_id);
-      }
+      await adjustSupplierBalance(txn.supplier_id, txn.amount || 0);
     }
 
     // Reverse loan balance
     if (txn.loan_id) {
-      const loan = loans.find((l) => l.id === txn.loan_id);
-      if (loan) {
-        const newBal = (loan.remaining_balance || 0) + (txn.amount || 0);
-        const newPaid = Math.max(0, (loan.amount_paid || 0) - (txn.amount || 0));
-        await supabase.from('loan_trackers').update({ remaining_balance: newBal, amount_paid: newPaid, status: 'active' }).eq('id', txn.loan_id);
-      }
+      await adjustLoanBalance(txn.loan_id, -(txn.amount || 0));
     }
 
     await supabase.from('transactions').update({ is_void: true, void_reason: reason }).eq('id', id);
@@ -321,18 +307,10 @@ export default function Expenses() {
 
     // Reverse old effects
     if (oldTxn.supplier_id && (oldTxn.category === 'supplier_payment' || oldTxn.category === 'stock')) {
-      const supp = suppliers.find((s) => s.id === oldTxn.supplier_id);
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: (supp.balance || 0) + (oldTxn.amount || 0) }).eq('id', oldTxn.supplier_id);
-      }
+      await adjustSupplierBalance(oldTxn.supplier_id, oldTxn.amount || 0);
     }
     if (oldTxn.loan_id) {
-      const loan = loans.find((l) => l.id === oldTxn.loan_id);
-      if (loan) {
-        const newBal = (loan.remaining_balance || 0) + (oldTxn.amount || 0);
-        const newPaid = Math.max(0, (loan.amount_paid || 0) - (oldTxn.amount || 0));
-        await supabase.from('loan_trackers').update({ remaining_balance: newBal, amount_paid: newPaid, status: 'active' }).eq('id', oldTxn.loan_id);
-      }
+      await adjustLoanBalance(oldTxn.loan_id, -(oldTxn.amount || 0));
     }
 
     // Update transaction
@@ -347,22 +325,15 @@ export default function Expenses() {
       loan_id: form.loanId || null,
       partner_id: isPartnerExpense ? category : (isHomeExpense ? form.partnerId || null : null),
       type: isPartnerExpense ? 'partner_draw' : 'expense',
+      edited_at: new Date().toISOString(),
     }).eq('id', editingId);
 
     // Apply new effects
     if (form.supplierId && (category === 'supplier_payment' || category === 'stock')) {
-      const supp = suppliers.find((s) => s.id === form.supplierId);
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: Math.max(0, (supp.balance || 0) - amt) }).eq('id', form.supplierId);
-      }
+      await adjustSupplierBalance(form.supplierId, -amt);
     }
     if (form.loanId) {
-      const loan = loans.find((l) => l.id === form.loanId);
-      if (loan) {
-        const newBal = Math.max(0, (loan.remaining_balance || 0) - amt);
-        const newPaid = (loan.amount_paid || 0) + amt;
-        await supabase.from('loan_trackers').update({ remaining_balance: newBal, amount_paid: newPaid, status: newBal <= 0 ? 'settled' : 'active' }).eq('id', form.loanId);
-      }
+      await adjustLoanBalance(form.loanId, amt);
     }
 
     setEditingId(null);
@@ -408,7 +379,7 @@ export default function Expenses() {
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={() => { setShowAdd(true); setEditingId(null); setForm({ ...emptyForm, partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : '' }); }}
+          onClick={() => { setShowAdd(true); setEditingId(null); setForm({ ...emptyForm, date: todayStr(), partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : '' }); }}
           className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
         >
           <Plus size={16} /> Add {activeTab === 'shop' ? 'Expense' : activeTab === 'home' ? 'Home Expense' : activeTab === 'suppliers' ? 'Supplier Payment' : 'Loan Payment'}
@@ -709,7 +680,14 @@ export default function Expenses() {
                                   {exp.type === 'partner_draw' && ' (Partner)'}
                                 </span>
                               </td>
-                              <td className="px-4 py-2 text-slate-700">{exp.description || '-'}</td>
+                              <td className="px-4 py-2 text-slate-700">
+                                {exp.description || '-'}
+                                {exp.edited_at && (
+                                  <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Edited ${formatDate(exp.edited_at)}`}>
+                                    Edited
+                                  </span>
+                                )}
+                              </td>
                               <td className="px-4 py-2 text-slate-500">{exp.primary_mode}</td>
                               <td className="px-4 py-2 text-right font-medium text-red-600">{formatKES(exp.amount)}</td>
                               <td className="px-4 py-2 text-center">

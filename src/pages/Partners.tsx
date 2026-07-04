@@ -10,7 +10,7 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
-import { formatKES, formatDate, getMonthLabel } from '../utils/format';
+import { formatKES, formatDate, getMonthLabel, todayStr } from '../utils/format';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -290,10 +290,10 @@ export default function Partners() {
 
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">
-        <button onClick={() => { setShowDraw(true); setDrawForm({ ...emptyDraw, partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : activePartner }); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <button onClick={() => { setShowDraw(true); setDrawForm({ ...emptyDraw, date: todayStr(), partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : activePartner }); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <ArrowDownCircle size={16} /> Take Money
         </button>
-        <button onClick={() => { setShowReturn(true); setReturnForm({ ...emptyDraw, partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : activePartner }); }} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <button onClick={() => { setShowReturn(true); setReturnForm({ ...emptyDraw, date: todayStr(), partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : activePartner }); }} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <ArrowUpCircle size={16} /> Return Money
         </button>
         <button onClick={() => setShowLedger(true)} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
@@ -409,7 +409,7 @@ export default function Partners() {
                         <button
                           onClick={() => {
                             setShowMarkTaken({ type: 'profit', amount: ps.remaining, id: ps.month });
-                            setMarkForm({ ...emptyDraw, amount: String(ps.remaining) });
+                            setMarkForm({ ...emptyDraw, date: todayStr(), amount: String(ps.remaining) });
                           }}
                           className="text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 px-2 py-1 rounded transition-colors"
                         >
@@ -463,7 +463,7 @@ export default function Partners() {
                         <button
                           onClick={() => {
                             setShowMarkTaken({ type: 'expense', amount: he.amount, id: he.id });
-                            setMarkForm({ ...emptyDraw, amount: String(he.amount) });
+                            setMarkForm({ ...emptyDraw, date: todayStr(), amount: String(he.amount) });
                           }}
                           className="text-xs bg-emerald-100 text-emerald-700 hover:bg-emerald-200 px-2 py-1 rounded transition-colors"
                         >

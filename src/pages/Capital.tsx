@@ -11,7 +11,8 @@ import {
   Edit2,
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
-import { formatKES, formatDate, getMonthLabel } from '../utils/format';
+import { formatKES, formatDate, getMonthLabel, todayStr } from '../utils/format';
+import { adjustLoanBalance } from '../utils/balances';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -127,14 +128,7 @@ export default function Capital() {
     const loan = loans.find((l) => l.id === selectedLoan);
     if (!loan) return;
 
-    const newBal = Math.max(0, (loan.remaining_balance || 0) - amt);
-    const newPaid = (loan.amount_paid || 0) + amt;
-
-    await supabase.from('loan_trackers').update({
-      remaining_balance: newBal,
-      amount_paid: newPaid,
-      status: newBal <= 0 ? 'settled' : 'active',
-    }).eq('id', selectedLoan);
+    await adjustLoanBalance(selectedLoan, amt);
 
     await supabase.from('loan_payments').insert({
       loan_id: selectedLoan,
@@ -171,7 +165,7 @@ export default function Capital() {
       created_by: user?.username || null,
     });
 
-    setLoanPaymentForm({ amount: '', date: new Date().toISOString().split('T')[0], mode: 'cash', notes: '' });
+    setLoanPaymentForm({ amount: '', date: todayStr(), mode: 'cash', notes: '' });
     setShowLoanPayment(false);
     fetchData();
     triggerRefresh();
@@ -297,16 +291,16 @@ export default function Capital() {
     <div className="space-y-6">
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">
-        <button onClick={() => { setShowCapital(true); setCapitalForm({ ...emptyCapital, partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : 'taher' }); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <button onClick={() => { setShowCapital(true); setCapitalForm({ ...emptyCapital, date: todayStr(), partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : 'taher' }); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <Plus size={16} /> Add Capital Entry
         </button>
-        <button onClick={() => { setShowLoanPayment(true); setLoanPaymentForm({ amount: '', date: new Date().toISOString().split('T')[0], mode: 'cash', notes: '' }); }} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <button onClick={() => { setShowLoanPayment(true); setLoanPaymentForm({ amount: '', date: todayStr(), mode: 'cash', notes: '' }); }} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <Plus size={16} /> Loan Payment
         </button>
-        <button onClick={() => { setShowAddLoan(true); setNewLoanForm({ loanName: '', totalAmount: '', amountPaid: '0', monthlyInstallment: '', startDate: new Date().toISOString().split('T')[0], notes: '' }); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <button onClick={() => { setShowAddLoan(true); setNewLoanForm({ loanName: '', totalAmount: '', amountPaid: '0', monthlyInstallment: '', startDate: todayStr(), notes: '' }); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <Plus size={16} /> Add New Loan
         </button>
-        <button onClick={() => setShowHistorical(true)} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <button onClick={() => { setShowHistorical(true); setHistoricalForm({ month: todayStr().slice(0, 7), totalProfit: '', taherShare: '', abdulqadirShare: '', taherTaken: '', abdulqadirTaken: '', notes: '' }); }} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <Plus size={16} /> Historical Profit
         </button>
         <button onClick={() => setShowLedger(true)} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">

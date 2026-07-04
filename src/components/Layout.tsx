@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -23,9 +23,9 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../utils/supabase';
-import { formatKES } from '../utils/format';
+import { formatKES, formatDate } from '../utils/format';
 import { useDataRefresh } from '../context/DataContext';
-import type { Supplier, Customer } from '../types';
+import type { Supplier, Customer, Reminder } from '../types';
 
 const navItems = [
   { label: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -46,6 +46,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [showReminderPopup, setShowReminderPopup] = useState(false);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | 'unsupported'>(
+    typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
+  );
   const [reminderForm, setReminderForm] = useState({
     entityType: 'supplier' as 'supplier' | 'customer',
     entityId: '',
@@ -58,14 +62,56 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
-  const { triggerRefresh } = useDataRefresh();
+  const { refreshKey, triggerRefresh } = useDataRefresh();
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  // Kept loaded on every page (not just while the reminder popup is open) so
+  // reminder notifications can fire and show entity names no matter which
+  // page the user is currently on.
   useEffect(() => {
-    if (showReminderPopup) {
-      supabase.from('suppliers').select('*').eq('is_active', true).then(({ data }) => setSuppliers(data || []));
-      supabase.from('customers').select('*').eq('is_active', true).then(({ data }) => setCustomers(data || []));
-    }
-  }, [showReminderPopup]);
+    supabase.from('suppliers').select('*').eq('is_active', true).then(({ data }) => setSuppliers(data || []));
+    supabase.from('customers').select('*').eq('is_active', true).then(({ data }) => setCustomers(data || []));
+    supabase.from('reminders').select('*').eq('status', 'pending').then(({ data }) => setReminders(data || []));
+  }, [refreshKey]);
+
+  // Check for due reminders every minute, regardless of which page is open
+  useEffect(() => {
+    const checkReminders = () => {
+      if (notifPermission !== 'granted') return;
+      const now = new Date();
+      const due = reminders.filter((r) => {
+        const reminderDate = new Date(r.reminder_date);
+        const reminderTime = r.reminder_time || '09:00';
+        const [hours, minutes] = reminderTime.split(':').map(Number);
+        reminderDate.setHours(hours, minutes, 0, 0);
+        return reminderDate <= now && r.status === 'pending';
+      });
+      if (due.length > 0) {
+        due.forEach((r) => {
+          const entity = r.entity_type === 'supplier'
+            ? suppliers.find((s) => s.id === r.entity_id)
+            : customers.find((c) => c.id === r.entity_id);
+          new Notification(`Payment Reminder: ${r.reminder_type === 'supplier_payment' ? 'Pay' : 'Collect from'} ${entity?.name || 'Unknown'}`, {
+            body: `Amount: KES ${formatKES(r.amount || 0)}\nDue: ${formatDate(r.due_date)}`,
+            icon: '/favicon.ico',
+            tag: r.id, // Prevents duplicate notifications
+          });
+        });
+        if (audioRef.current) {
+          audioRef.current.play().catch(() => {});
+        }
+      }
+    };
+
+    checkReminders();
+    const interval = setInterval(checkReminders, 60000);
+    return () => clearInterval(interval);
+  }, [reminders, suppliers, customers, notifPermission]);
+
+  function enableNotifications() {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    Notification.requestPermission().then((permission) => setNotifPermission(permission));
+  }
 
   const handleLogout = () => {
     logout();
@@ -186,6 +232,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <Bell size={18} />
           </button>
         </header>
+
+        {/* Enable notifications prompt - browsers block silent/automatic permission requests, so this must be a real click */}
+        {notifPermission === 'default' && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-sm">
+            <Bell size={16} className="text-amber-600 flex-shrink-0" />
+            <span className="text-amber-800 flex-1">Turn on notifications to get popup + sound alerts when a reminder is due.</span>
+            <button
+              onClick={enableNotifications}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1 rounded-lg text-xs font-medium flex-shrink-0"
+            >
+              Enable Notifications
+            </button>
+          </div>
+        )}
+
+        {/* Hidden audio for reminder notification sound */}
+        <audio ref={audioRef} src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdH2LkZeYl5aSjIR8eXp5e3uBh4yRk5aXl5aTkI2HgH17e3t7fISLkpWYl5eWko6IhIJ8e3t8fYOKkJWYmJiWko6JhYOBfHt8fYGHjZGXmJiWk46JhoSDgX18fX6Ch4yRlpiYlpKOiYWEg4F9fX5/gYaMkZaYmJaSjomFhIOBf39/gIGGjJGXmJeWko6JhYSDgYB/f4CCRoyRlpiXlpKOioWEg4GAf3+AgYaOkZSYl5aSjYqFhIOBf4CAgYSMkZSYl5aTjomFhIOCf4CBgYaNkZSXl5aTjomGhIOCf4CBgoiQlJeXlpOOioWEg4J/gIGChoyRlJeWlZOQi4WEg4J/gICCgoeOkpSWlpSSkIuGhIOCf4GCg4ePkpSVlZSQjouGhIOCgIGCg4ePkpOTkpKQjouGhIOCgIGChA==" />
 
         {/* Quick Add Reminder Popup */}
         {showReminderPopup && (

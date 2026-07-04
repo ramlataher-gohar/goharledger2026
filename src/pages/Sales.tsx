@@ -13,7 +13,8 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
-import { formatKES, formatDate, generateTransactionId } from '../utils/format';
+import { formatKES, formatDate, generateTransactionId, todayStr } from '../utils/format';
+import { adjustCustomerCredit, adjustCustomerAdvance, adjustSupplierBalance } from '../utils/balances';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -189,26 +190,18 @@ export default function Sales() {
       if (splits.length > 0) await supabase.from('transaction_splits').insert(splits);
     }
 
-    // For advance mode, also create a split to track the advance portion
+    // For advance mode, the sale is paid for out of the customer's existing
+    // advance/prepaid balance, so it spends it down (not up)
     if (form.mode === 'advance' && form.customerId) {
-      const cust = customers.find((c) => c.id === form.customerId);
-      if (cust) {
-        await supabase.from('customers').update({ advance_balance: (cust.advance_balance || 0) + sp }).eq('id', form.customerId);
-      }
+      await adjustCustomerAdvance(form.customerId, -sp);
     }
 
     if (form.mode === 'credit' && form.customerId) {
-      const cust = customers.find((c) => c.id === form.customerId);
-      if (cust) {
-        await supabase.from('customers').update({ credit_balance: (cust.credit_balance || 0) + sp }).eq('id', form.customerId);
-      }
+      await adjustCustomerCredit(form.customerId, sp);
     }
 
     if (form.mode === 'supplier' && form.supplierId) {
-      const supp = suppliers.find((s) => s.id === form.supplierId);
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: Math.max(0, (supp.balance || 0) - sp) }).eq('id', form.supplierId);
-      }
+      await adjustSupplierBalance(form.supplierId, -sp);
     }
 
     setForm(emptyForm);
@@ -258,16 +251,13 @@ export default function Sales() {
       }
 
       if (f.mode === 'credit' && f.customerId) {
-        const cust = customers.find((c) => c.id === f.customerId);
-        if (cust) await supabase.from('customers').update({ credit_balance: (cust.credit_balance || 0) + sp }).eq('id', f.customerId);
+        await adjustCustomerCredit(f.customerId, sp);
       }
       if (f.mode === 'advance' && f.customerId) {
-        const cust = customers.find((c) => c.id === f.customerId);
-        if (cust) await supabase.from('customers').update({ advance_balance: Math.max(0, (cust.advance_balance || 0) - sp) }).eq('id', f.customerId);
+        await adjustCustomerAdvance(f.customerId, -sp);
       }
       if (f.mode === 'supplier' && f.supplierId) {
-        const supp = suppliers.find((s) => s.id === f.supplierId);
-        if (supp) await supabase.from('suppliers').update({ balance: Math.max(0, (supp.balance || 0) - sp) }).eq('id', f.supplierId);
+        await adjustSupplierBalance(f.supplierId, -sp);
       }
     }
 
@@ -283,20 +273,14 @@ export default function Sales() {
 
     // Reverse customer/supplier balances
     if (txn.customer_id && (txn.primary_mode === 'credit' || txn.primary_mode === 'advance')) {
-      const cust = customers.find((c) => c.id === txn.customer_id);
-      if (cust) {
-        if (txn.primary_mode === 'credit') {
-          await supabase.from('customers').update({ credit_balance: Math.max(0, (cust.credit_balance || 0) - (txn.amount || 0)) }).eq('id', txn.customer_id);
-        } else {
-          await supabase.from('customers').update({ advance_balance: (cust.advance_balance || 0) + (txn.amount || 0) }).eq('id', txn.customer_id);
-        }
+      if (txn.primary_mode === 'credit') {
+        await adjustCustomerCredit(txn.customer_id, -(txn.amount || 0));
+      } else {
+        await adjustCustomerAdvance(txn.customer_id, txn.amount || 0);
       }
     }
     if (txn.supplier_id && txn.primary_mode === 'supplier') {
-      const supp = suppliers.find((s) => s.id === txn.supplier_id);
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: (supp.balance || 0) + (txn.amount || 0) }).eq('id', txn.supplier_id);
-      }
+      await adjustSupplierBalance(txn.supplier_id, txn.amount || 0);
     }
 
     await supabase.from('transactions').update({ is_void: true, void_reason: reason }).eq('id', id);
@@ -315,20 +299,14 @@ export default function Sales() {
 
     // Reverse old customer/supplier effects
     if (oldTxn.customer_id && (oldTxn.primary_mode === 'credit' || oldTxn.primary_mode === 'advance')) {
-      const cust = customers.find((c) => c.id === oldTxn.customer_id);
-      if (cust) {
-        if (oldTxn.primary_mode === 'credit') {
-          await supabase.from('customers').update({ credit_balance: Math.max(0, (cust.credit_balance || 0) - (oldTxn.amount || 0)) }).eq('id', oldTxn.customer_id);
-        } else {
-          await supabase.from('customers').update({ advance_balance: (cust.advance_balance || 0) + (oldTxn.amount || 0) }).eq('id', oldTxn.customer_id);
-        }
+      if (oldTxn.primary_mode === 'credit') {
+        await adjustCustomerCredit(oldTxn.customer_id, -(oldTxn.amount || 0));
+      } else {
+        await adjustCustomerAdvance(oldTxn.customer_id, oldTxn.amount || 0);
       }
     }
     if (oldTxn.supplier_id && oldTxn.primary_mode === 'supplier') {
-      const supp = suppliers.find((s) => s.id === oldTxn.supplier_id);
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: (supp.balance || 0) + (oldTxn.amount || 0) }).eq('id', oldTxn.supplier_id);
-      }
+      await adjustSupplierBalance(oldTxn.supplier_id, oldTxn.amount || 0);
     }
 
     // Update transaction
@@ -345,26 +323,18 @@ export default function Sales() {
       is_unclassified: form.isUnclassified,
       customer_id: form.mode === 'credit' || form.mode === 'advance' ? (form.customerId || null) : null,
       supplier_id: form.mode === 'supplier' ? (form.supplierId || null) : null,
+      edited_at: new Date().toISOString(),
     }).eq('id', editingId);
 
     // Apply new customer/supplier effects
     if (form.mode === 'credit' && form.customerId) {
-      const cust = customers.find((c) => c.id === form.customerId);
-      if (cust) {
-        await supabase.from('customers').update({ credit_balance: (cust.credit_balance || 0) + sp }).eq('id', form.customerId);
-      }
+      await adjustCustomerCredit(form.customerId, sp);
     }
     if (form.mode === 'advance' && form.customerId) {
-      const cust = customers.find((c) => c.id === form.customerId);
-      if (cust) {
-        await supabase.from('customers').update({ advance_balance: Math.max(0, (cust.advance_balance || 0) - sp) }).eq('id', form.customerId);
-      }
+      await adjustCustomerAdvance(form.customerId, -sp);
     }
     if (form.mode === 'supplier' && form.supplierId) {
-      const supp = suppliers.find((s) => s.id === form.supplierId);
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: Math.max(0, (supp.balance || 0) - sp) }).eq('id', form.supplierId);
-      }
+      await adjustSupplierBalance(form.supplierId, -sp);
     }
 
     setEditingId(null);
@@ -416,13 +386,13 @@ export default function Sales() {
       {/* Header actions */}
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={() => { setShowAdd(true); setShowBulk(false); setEditingId(null); setForm(emptyForm); }}
+          onClick={() => { setShowAdd(true); setShowBulk(false); setEditingId(null); setForm({ ...emptyForm, date: todayStr() }); }}
           className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
         >
           <Plus size={16} /> Add Sale
         </button>
         <button
-          onClick={() => { setShowBulk(true); setShowAdd(false); setEditingId(null); }}
+          onClick={() => { setShowBulk(true); setShowAdd(false); setEditingId(null); setBulkForms([{ ...emptyForm, date: todayStr() }, { ...emptyForm, date: todayStr() }, { ...emptyForm, date: todayStr() }]); }}
           className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
         >
           <Plus size={16} /> Bulk Entry
@@ -575,7 +545,7 @@ export default function Sales() {
                       if (idx === fields.length - 1) {
                         // Last field - add new row or save
                         if (i === bulkForms.length - 1) {
-                          setBulkForms([...bulkForms, emptyForm]);
+                          setBulkForms([...bulkForms, { ...emptyForm, date: todayStr() }]);
                         }
                       }
                     }
@@ -586,7 +556,7 @@ export default function Sales() {
           </div>
           <div className="flex gap-3 mt-3 pt-3 border-t border-slate-200">
             <button
-              onClick={() => setBulkForms([...bulkForms, emptyForm])}
+              onClick={() => setBulkForms([...bulkForms, { ...emptyForm, date: todayStr() }])}
               className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-1.5 rounded text-sm font-medium flex items-center gap-1"
             >
               <Plus size={14} /> Add Row
@@ -663,7 +633,14 @@ export default function Sales() {
                                     {sale.primary_mode}
                                   </span>
                                 </td>
-                                <td className="px-4 py-2 text-slate-700">{sale.description || '-'}</td>
+                                <td className="px-4 py-2 text-slate-700">
+                                  {sale.description || '-'}
+                                  {sale.edited_at && (
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Edited ${formatDate(sale.edited_at)}`}>
+                                      Edited
+                                    </span>
+                                  )}
+                                </td>
                                 <td className="px-4 py-2 text-right font-medium">{formatKES(sale.selling_price || 0)}</td>
                                 <td className="px-4 py-2 text-right text-slate-500">{formatKES(sale.cost_price || 0)}</td>
                                 <td className={`px-4 py-2 text-right font-medium ${profit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>

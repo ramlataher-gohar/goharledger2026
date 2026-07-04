@@ -10,7 +10,8 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
-import { formatKES, formatDate } from '../utils/format';
+import { formatKES, formatDate, todayStr } from '../utils/format';
+import { adjustSupplierBalance } from '../utils/balances';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -170,8 +171,9 @@ export default function Suppliers() {
       created_by: user?.username || null,
     });
 
-    // Update supplier balance
-    await supabase.from('suppliers').update({ balance: (selectedSupplier.balance || 0) + amt }).eq('id', selectedSupplier.id);
+    // Update supplier balance (re-reads the current balance first so two invoices added
+    // back-to-back always add up instead of one overwriting the other)
+    await adjustSupplierBalance(selectedSupplier.id, amt);
 
     // Create reminder if set
     if (invoiceForm.setReminder && invoiceForm.reminderDate) {
@@ -222,7 +224,7 @@ export default function Suppliers() {
       created_by: user?.username || null,
     });
 
-    await supabase.from('suppliers').update({ balance: Math.max(0, (selectedSupplier.balance || 0) - amt) }).eq('id', selectedSupplier.id);
+    await adjustSupplierBalance(selectedSupplier.id, -amt);
 
     setPaymentForm(emptyPayment);
     setShowPayment(false);
@@ -234,16 +236,16 @@ export default function Suppliers() {
     if (!txn) return;
 
     if (txn.supplier_id && txn.type === 'expense') {
-      const supp = suppliers.find((s) => s.id === txn.supplier_id);
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: Math.max(0, (supp.balance || 0) - (txn.amount || 0)) }).eq('id', txn.supplier_id);
-      }
+      await adjustSupplierBalance(txn.supplier_id, -(txn.amount || 0));
     }
     if (txn.supplier_id && txn.type === 'supplier_payment') {
-      const supp = suppliers.find((s) => s.id === txn.supplier_id);
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: (supp.balance || 0) + (txn.amount || 0) }).eq('id', txn.supplier_id);
-      }
+      await adjustSupplierBalance(txn.supplier_id, txn.amount || 0);
+    }
+    if (txn.supplier_id && txn.type === 'supplier_invoice') {
+      await adjustSupplierBalance(txn.supplier_id, -(txn.amount || 0));
+    }
+    if (txn.supplier_id && txn.type === 'sale' && txn.primary_mode === 'supplier') {
+      await adjustSupplierBalance(txn.supplier_id, txn.selling_price ?? txn.amount ?? 0);
     }
 
     await supabase.from('transactions').update({ is_void: true }).eq('id', id);
@@ -402,8 +404,8 @@ export default function Suppliers() {
                   <button onClick={() => startEdit(selectedSupplier)} className="p-1.5 hover:bg-slate-100 rounded">
                     <Edit2 size={14} className="text-slate-500" />
                   </button>
-                  <button onClick={() => { setShowInvoice(true); setInvoiceForm({ ...emptyInvoice, date: new Date().toISOString().split('T')[0] }); }} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium">Add Invoice</button>
-                  <button onClick={() => { setShowPayment(true); setPaymentForm({ ...emptyPayment, date: new Date().toISOString().split('T')[0] }); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium">Pay Supplier</button>
+                  <button onClick={() => { setShowInvoice(true); setInvoiceForm({ ...emptyInvoice, date: todayStr() }); }} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium">Add Invoice</button>
+                  <button onClick={() => { setShowPayment(true); setPaymentForm({ ...emptyPayment, date: todayStr() }); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium">Pay Supplier</button>
                 </div>
               </div>
 
@@ -437,17 +439,24 @@ export default function Suppliers() {
                             <span className={`text-xs px-2 py-0.5 rounded-full ${
                               t.type === 'expense' ? 'bg-red-100 text-red-700' :
                               t.type === 'supplier_invoice' ? 'bg-amber-100 text-amber-700' :
-                              t.type === 'supplier_payment' ? 'bg-emerald-100 text-emerald-700' :
+                              t.type === 'supplier_payment' || t.type === 'sale' ? 'bg-emerald-100 text-emerald-700' :
                               'bg-slate-100 text-slate-700'
                             }`}>
-                              {t.type === 'supplier_payment' ? 'Payment' : t.type === 'supplier_invoice' ? 'Invoice' : t.type}
+                              {t.type === 'supplier_payment' ? 'Payment' : t.type === 'supplier_invoice' ? 'Invoice' : t.type === 'sale' ? 'Payment (Sale)' : t.type}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-slate-700">{t.description || '-'}</td>
+                          <td className="px-3 py-2 text-slate-700">
+                            {t.description || '-'}
+                            {t.edited_at && (
+                              <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Edited ${formatDate(t.edited_at)}`}>
+                                Edited
+                              </span>
+                            )}
+                          </td>
                           <td className={`px-3 py-2 text-right font-medium ${
-                            t.type === 'supplier_payment' ? 'text-emerald-600' : 'text-red-600'
+                            t.type === 'supplier_payment' || t.type === 'sale' ? 'text-emerald-600' : 'text-red-600'
                           }`}>
-                            {t.type === 'supplier_payment' ? '-' : '+'}{formatKES(t.amount)}
+                            {t.type === 'supplier_payment' || t.type === 'sale' ? '-' : '+'}{formatKES(t.type === 'sale' ? (t.selling_price ?? t.amount) : t.amount)}
                           </td>
                           <td className="px-3 py-2 text-center">
                             <button
