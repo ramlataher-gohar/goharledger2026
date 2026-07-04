@@ -60,6 +60,7 @@ export default function Sales() {
   const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
   const [sales, setSales] = useState<Transaction[]>([]);
+  const [splits, setSplits] = useState<{ transaction_id: string; mode: string; amount: number }[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,12 +85,14 @@ export default function Sales() {
 
   async function fetchData() {
     setLoading(true);
-    const [{ data: txns }, { data: cust }, { data: supp }] = await Promise.all([
+    const [{ data: txns }, { data: splitData }, { data: cust }, { data: supp }] = await Promise.all([
       supabase.from('transactions').select('*').eq('type', 'sale').order('date', { ascending: false }).order('created_at', { ascending: false }),
+      supabase.from('transaction_splits').select('*'),
       supabase.from('customers').select('*').eq('is_active', true),
       supabase.from('suppliers').select('*').eq('is_active', true),
     ]);
     setSales(txns || []);
+    setSplits(splitData || []);
     setCustomers(cust || []);
     setSuppliers(supp || []);
     setLoading(false);
@@ -326,6 +329,18 @@ export default function Sales() {
       edited_at: new Date().toISOString(),
     }).eq('id', editingId);
 
+    // Replace the split breakdown to match the (possibly new) mode/amounts -
+    // old rows are cleared first so switching away from split mode, or
+    // changing the amounts, never leaves a stale/mismatched breakdown behind
+    await supabase.from('transaction_splits').delete().eq('transaction_id', oldTxn.transaction_id);
+    if (form.mode === 'split') {
+      const newSplits = [];
+      if (parseFloat(form.splitMpesa || '0') > 0) newSplits.push({ transaction_id: oldTxn.transaction_id, mode: 'mpesa', amount: parseFloat(form.splitMpesa) });
+      if (parseFloat(form.splitCash || '0') > 0) newSplits.push({ transaction_id: oldTxn.transaction_id, mode: 'cash', amount: parseFloat(form.splitCash) });
+      if (parseFloat(form.splitPaybill || '0') > 0) newSplits.push({ transaction_id: oldTxn.transaction_id, mode: 'paybill', amount: parseFloat(form.splitPaybill) });
+      if (newSplits.length > 0) await supabase.from('transaction_splits').insert(newSplits);
+    }
+
     // Apply new customer/supplier effects
     if (form.mode === 'credit' && form.customerId) {
       await adjustCustomerCredit(form.customerId, sp);
@@ -346,6 +361,7 @@ export default function Sales() {
 
   function startEdit(sale: Transaction) {
     setEditingId(sale.id);
+    const existingSplits = splits.filter((s) => s.transaction_id === sale.transaction_id);
     setForm({
       date: sale.date,
       mode: (sale.primary_mode as SaleMode) || 'cash',
@@ -356,9 +372,9 @@ export default function Sales() {
       notes: sale.description || sale.notes || '',
       customerId: sale.customer_id || '',
       supplierId: sale.supplier_id || '',
-      splitMpesa: '',
-      splitCash: '',
-      splitPaybill: '',
+      splitMpesa: String(existingSplits.find((s) => s.mode === 'mpesa')?.amount || ''),
+      splitCash: String(existingSplits.find((s) => s.mode === 'cash')?.amount || ''),
+      splitPaybill: String(existingSplits.find((s) => s.mode === 'paybill')?.amount || ''),
       isUnclassified: sale.is_unclassified,
       advanceMode: 'cash',
     });

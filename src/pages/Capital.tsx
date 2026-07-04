@@ -55,6 +55,8 @@ export default function Capital() {
   const [showEditLoan, setShowEditLoan] = useState<string | null>(null);
   const [showHistorical, setShowHistorical] = useState(false);
   const [selectedLoan, setSelectedLoan] = useState<string>('');
+  const [editingCapitalId, setEditingCapitalId] = useState<string | null>(null);
+  const [editingHistoricalId, setEditingHistoricalId] = useState<string | null>(null);
   const [capitalForm, setCapitalForm] = useState<CapitalForm>(emptyCapital);
   const [loanPaymentForm, setLoanPaymentForm] = useState<LoanPaymentForm>({ amount: '', date: new Date().toISOString().split('T')[0], mode: 'cash', notes: '' });
   const [newLoanForm, setNewLoanForm] = useState({
@@ -103,20 +105,90 @@ export default function Capital() {
     setLoading(false);
   }
 
+  function capitalDescription(form: CapitalForm) {
+    return `Capital: ${form.entryType.replace(/_/g, ' ')} - ${form.partnerId}${form.description ? ' | ' + form.description : ''}`;
+  }
+
   async function handleSaveCapital() {
     if (!capitalForm.amount || parseFloat(capitalForm.amount) <= 0) return;
 
-    await supabase.from('capital_entries').insert({
+    const { data: entry } = await supabase.from('capital_entries').insert({
       partner_id: capitalForm.partnerId,
       entry_type: capitalForm.entryType,
       amount: parseFloat(capitalForm.amount),
       date: capitalForm.date,
       description: capitalForm.description || null,
       created_by: user?.username || null,
-    });
+    }).select().single();
+
+    // Mirror into transactions so it shows up in Reports and the shared Ledger
+    if (entry) {
+      await supabase.from('transactions').insert({
+        transaction_id: `CAP-${entry.id}`,
+        date: entry.date,
+        type: 'capital_entry',
+        primary_mode: null,
+        amount: entry.amount,
+        partner_id: entry.partner_id,
+        category: entry.entry_type,
+        description: capitalDescription(capitalForm),
+        notes: entry.description || null,
+        created_by: user?.username || null,
+      });
+    }
 
     setCapitalForm({ ...emptyCapital, partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : 'taher' });
     setShowCapital(false);
+    fetchData();
+    triggerRefresh();
+  }
+
+  function startEditCapital(entry: CapitalEntry) {
+    setEditingCapitalId(entry.id);
+    setCapitalForm({
+      partnerId: entry.partner_id,
+      entryType: entry.entry_type,
+      amount: String(entry.amount),
+      date: entry.date,
+      description: entry.description || '',
+    });
+    setShowCapital(true);
+  }
+
+  async function handleUpdateCapital() {
+    if (!editingCapitalId || !capitalForm.amount || parseFloat(capitalForm.amount) <= 0) return;
+
+    const payload = {
+      partner_id: capitalForm.partnerId,
+      entry_type: capitalForm.entryType,
+      amount: parseFloat(capitalForm.amount),
+      date: capitalForm.date,
+      description: capitalForm.description || null,
+    };
+
+    await supabase.from('capital_entries').update(payload).eq('id', editingCapitalId);
+
+    await supabase.from('transactions').update({
+      date: payload.date,
+      amount: payload.amount,
+      partner_id: payload.partner_id,
+      category: payload.entry_type,
+      description: capitalDescription(capitalForm),
+      notes: payload.description,
+      edited_at: new Date().toISOString(),
+    }).eq('transaction_id', `CAP-${editingCapitalId}`);
+
+    setEditingCapitalId(null);
+    setCapitalForm({ ...emptyCapital, partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : 'taher' });
+    setShowCapital(false);
+    fetchData();
+    triggerRefresh();
+  }
+
+  async function handleDeleteCapital(id: string) {
+    if (!confirm('Delete this capital entry? This cannot be undone.')) return;
+    await supabase.from('transactions').update({ is_void: true, void_reason: 'Capital entry deleted' }).eq('transaction_id', `CAP-${id}`);
+    await supabase.from('capital_entries').delete().eq('id', id);
     fetchData();
     triggerRefresh();
   }
@@ -260,6 +332,63 @@ export default function Capital() {
     triggerRefresh();
   }
 
+  function startEditHistorical(h: HistoricalProfit) {
+    setEditingHistoricalId(h.id);
+    setHistoricalForm({
+      month: h.month,
+      totalProfit: String(h.total_profit),
+      taherShare: String(h.taher_share ?? ''),
+      abdulqadirShare: String(h.abdulqadir_share ?? ''),
+      taherTaken: String(h.taher_taken ?? ''),
+      abdulqadirTaken: String(h.abdulqadir_taken ?? ''),
+      notes: h.notes || '',
+    });
+    setShowHistorical(true);
+  }
+
+  async function handleUpdateHistorical() {
+    if (!editingHistoricalId || !historicalForm.month || !historicalForm.totalProfit) return;
+
+    const totalProfit = parseFloat(historicalForm.totalProfit);
+    const taherShare = parseFloat(historicalForm.taherShare || '0');
+    const abdulqadirShare = parseFloat(historicalForm.abdulqadirShare || '0');
+    const taherTaken = parseFloat(historicalForm.taherTaken || '0');
+    const abdulqadirTaken = parseFloat(historicalForm.abdulqadirTaken || '0');
+    const retained = totalProfit - taherShare - abdulqadirShare;
+
+    await supabase.from('historical_profit').update({
+      month: historicalForm.month,
+      total_profit: totalProfit,
+      taher_share: taherShare,
+      abdulqadir_share: abdulqadirShare,
+      taher_taken: taherTaken,
+      abdulqadir_taken: abdulqadirTaken,
+      retained: retained,
+      notes: historicalForm.notes || null,
+    }).eq('id', editingHistoricalId);
+
+    setEditingHistoricalId(null);
+    setHistoricalForm({
+      month: todayStr().slice(0, 7),
+      totalProfit: '',
+      taherShare: '',
+      abdulqadirShare: '',
+      taherTaken: '',
+      abdulqadirTaken: '',
+      notes: '',
+    });
+    setShowHistorical(false);
+    fetchData();
+    triggerRefresh();
+  }
+
+  async function handleDeleteHistorical(id: string) {
+    if (!confirm('Delete this historical profit record? This cannot be undone.')) return;
+    await supabase.from('historical_profit').delete().eq('id', id);
+    fetchData();
+    triggerRefresh();
+  }
+
   function startEditLoan(loan: LoanTracker) {
     setShowEditLoan(loan.id);
     setEditLoanForm({
@@ -291,7 +420,7 @@ export default function Capital() {
     <div className="space-y-6">
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">
-        <button onClick={() => { setShowCapital(true); setCapitalForm({ ...emptyCapital, date: todayStr(), partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : 'taher' }); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <button onClick={() => { setShowCapital(true); setEditingCapitalId(null); setCapitalForm({ ...emptyCapital, date: todayStr(), partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : 'taher' }); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <Plus size={16} /> Add Capital Entry
         </button>
         <button onClick={() => { setShowLoanPayment(true); setLoanPaymentForm({ amount: '', date: todayStr(), mode: 'cash', notes: '' }); }} className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
@@ -300,7 +429,7 @@ export default function Capital() {
         <button onClick={() => { setShowAddLoan(true); setNewLoanForm({ loanName: '', totalAmount: '', amountPaid: '0', monthlyInstallment: '', startDate: todayStr(), notes: '' }); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <Plus size={16} /> Add New Loan
         </button>
-        <button onClick={() => { setShowHistorical(true); setHistoricalForm({ month: todayStr().slice(0, 7), totalProfit: '', taherShare: '', abdulqadirShare: '', taherTaken: '', abdulqadirTaken: '', notes: '' }); }} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <button onClick={() => { setShowHistorical(true); setEditingHistoricalId(null); setHistoricalForm({ month: todayStr().slice(0, 7), totalProfit: '', taherShare: '', abdulqadirShare: '', taherTaken: '', abdulqadirTaken: '', notes: '' }); }} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <Plus size={16} /> Historical Profit
         </button>
         <button onClick={() => setShowLedger(true)} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
@@ -312,8 +441,8 @@ export default function Capital() {
       {showCapital && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-slate-800 text-sm">Add Capital Entry</h3>
-            <button onClick={() => setShowCapital(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
+            <h3 className="font-semibold text-slate-800 text-sm">{editingCapitalId ? 'Edit' : 'Add'} Capital Entry</h3>
+            <button onClick={() => { setShowCapital(false); setEditingCapitalId(null); }} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
           </div>
           <div className="space-y-2">
             <div className="grid grid-cols-4 gap-2">
@@ -329,10 +458,10 @@ export default function Capital() {
               <input type="number" value={capitalForm.amount} onChange={(e) => setCapitalForm({ ...capitalForm, amount: e.target.value })} placeholder="Amount" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
               <input type="date" value={capitalForm.date} onChange={(e) => setCapitalForm({ ...capitalForm, date: e.target.value })} className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
             </div>
-            <input type="text" value={capitalForm.description} onChange={(e) => setCapitalForm({ ...capitalForm, description: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSaveCapital(); }}} placeholder="Description (optional)" className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
+            <input type="text" value={capitalForm.description} onChange={(e) => setCapitalForm({ ...capitalForm, description: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (editingCapitalId ? handleUpdateCapital : handleSaveCapital)(); }}} placeholder="Description (optional)" className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
             <div className="flex gap-2 pt-2 border-t border-slate-200">
-              <button onClick={handleSaveCapital} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded text-sm font-medium">Save</button>
-              <button onClick={() => setShowCapital(false)} className="text-slate-500 hover:text-slate-700 text-sm">Cancel</button>
+              <button onClick={editingCapitalId ? handleUpdateCapital : handleSaveCapital} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded text-sm font-medium">{editingCapitalId ? 'Update' : 'Save'}</button>
+              <button onClick={() => { setShowCapital(false); setEditingCapitalId(null); }} className="text-slate-500 hover:text-slate-700 text-sm">Cancel</button>
             </div>
           </div>
         </div>
@@ -418,8 +547,8 @@ export default function Capital() {
       {showHistorical && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-slate-800 text-sm">Add Historical Profit</h3>
-            <button onClick={() => setShowHistorical(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
+            <h3 className="font-semibold text-slate-800 text-sm">{editingHistoricalId ? 'Edit' : 'Add'} Historical Profit</h3>
+            <button onClick={() => { setShowHistorical(false); setEditingHistoricalId(null); }} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
           </div>
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
@@ -434,8 +563,8 @@ export default function Capital() {
               <input type="number" value={historicalForm.taherTaken} onChange={(e) => setHistoricalForm({ ...historicalForm, taherTaken: e.target.value })} placeholder="Taher Taken" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
               <input type="number" value={historicalForm.abdulqadirTaken} onChange={(e) => setHistoricalForm({ ...historicalForm, abdulqadirTaken: e.target.value })} placeholder="Abdul Taken" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
             </div>
-            <input type="text" value={historicalForm.notes} onChange={(e) => setHistoricalForm({ ...historicalForm, notes: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSaveHistorical(); }}} placeholder="Notes (optional)" className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
-            <button onClick={handleSaveHistorical} className="w-full bg-purple-600 hover:bg-purple-700 text-white py-1.5 rounded text-sm font-medium">Save</button>
+            <input type="text" value={historicalForm.notes} onChange={(e) => setHistoricalForm({ ...historicalForm, notes: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (editingHistoricalId ? handleUpdateHistorical : handleSaveHistorical)(); }}} placeholder="Notes (optional)" className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
+            <button onClick={editingHistoricalId ? handleUpdateHistorical : handleSaveHistorical} className="w-full bg-purple-600 hover:bg-purple-700 text-white py-1.5 rounded text-sm font-medium">{editingHistoricalId ? 'Update' : 'Save'}</button>
           </div>
         </div>
       )}
@@ -480,11 +609,12 @@ export default function Capital() {
                 <th className="px-4 py-2">Type</th>
                 <th className="px-4 py-2 text-right">Amount</th>
                 <th className="px-4 py-2">Description</th>
+                <th className="px-4 py-2 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {capitalEntries.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No capital entries</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No capital entries</td></tr>
               ) : (
                 capitalEntries.map((c) => (
                   <tr key={c.id} className="hover:bg-slate-50 transition-colors">
@@ -493,6 +623,12 @@ export default function Capital() {
                     <td className="px-4 py-2"><span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">{c.entry_type.replace('_', ' ')}</span></td>
                     <td className="px-4 py-2 text-right font-medium">{formatKES(c.amount)}</td>
                     <td className="px-4 py-2 text-slate-500">{c.description || '-'}</td>
+                    <td className="px-4 py-2 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button onClick={() => startEditCapital(c)} className="p-1 hover:bg-slate-200 rounded"><Edit2 size={14} className="text-slate-500" /></button>
+                        <button onClick={() => handleDeleteCapital(c.id)} className="p-1 hover:bg-red-100 rounded"><Trash2 size={14} className="text-red-500" /></button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
@@ -608,14 +744,15 @@ export default function Capital() {
                 <th className="px-4 py-2 text-right">Taher Taken</th>
                 <th className="px-4 py-2 text-right">Abdulqadir Taken</th>
                 <th className="px-4 py-2 text-right">Retained</th>
+                <th className="px-4 py-2 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {historicalProfit.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No historical data</td></tr>
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400">No historical data</td></tr>
               ) : (
                 historicalProfit.map((h) => (
-                  <tr key={h.month} className="hover:bg-slate-50 transition-colors">
+                  <tr key={h.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-2 font-medium">{getMonthLabel(h.month)}</td>
                     <td className="px-4 py-2 text-right font-medium">{formatKES(h.total_profit)}</td>
                     <td className="px-4 py-2 text-right">{formatKES(h.taher_share || 0)}</td>
@@ -623,6 +760,12 @@ export default function Capital() {
                     <td className="px-4 py-2 text-right">{formatKES(h.taher_taken)}</td>
                     <td className="px-4 py-2 text-right">{formatKES(h.abdulqadir_taken)}</td>
                     <td className="px-4 py-2 text-right font-medium text-emerald-600">{formatKES(h.retained || 0)}</td>
+                    <td className="px-4 py-2 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button onClick={() => startEditHistorical(h)} className="p-1 hover:bg-slate-200 rounded"><Edit2 size={14} className="text-slate-500" /></button>
+                        <button onClick={() => handleDeleteHistorical(h.id)} className="p-1 hover:bg-red-100 rounded"><Trash2 size={14} className="text-red-500" /></button>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}

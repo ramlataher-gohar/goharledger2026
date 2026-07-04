@@ -3,6 +3,7 @@ import { X, Filter, Download, Trash2, Edit2, Save } from 'lucide-react';
 import { supabase } from '../utils/supabase';
 import { formatKES, formatDate } from '../utils/format';
 import { useDataRefresh } from '../context/DataContext';
+import { adjustCustomerCredit, adjustCustomerAdvance, adjustSupplierBalance, adjustLoanBalance } from '../utils/balances';
 import type { Transaction, Customer, Supplier } from '../types';
 
 interface LedgerModalProps {
@@ -144,22 +145,38 @@ export default function LedgerModal({
     const txn = entries.find((e) => e.id === id);
     if (!txn) return;
 
-    // Reverse customer/supplier balances if needed
-    if (txn.customer_id && (txn.primary_mode === 'credit' || txn.primary_mode === 'advance')) {
-      const { data: cust } = await supabase.from('customers').select('*').eq('id', txn.customer_id).single();
-      if (cust) {
+    // Reverse whatever balance this entry affected when it was created - covers
+    // every type that can show up in this shared ledger, not just sales
+    if (txn.type === 'sale') {
+      if (txn.customer_id && (txn.primary_mode === 'credit' || txn.primary_mode === 'advance')) {
         if (txn.primary_mode === 'credit') {
-          await supabase.from('customers').update({ credit_balance: Math.max(0, (cust.credit_balance || 0) - (txn.amount || 0)) }).eq('id', txn.customer_id);
+          await adjustCustomerCredit(txn.customer_id, -(txn.amount || 0));
         } else {
-          await supabase.from('customers').update({ advance_balance: (cust.advance_balance || 0) + (txn.amount || 0) }).eq('id', txn.customer_id);
+          await adjustCustomerAdvance(txn.customer_id, txn.amount || 0);
         }
       }
-    }
-    if (txn.supplier_id && txn.primary_mode === 'supplier') {
-      const { data: supp } = await supabase.from('suppliers').select('*').eq('id', txn.supplier_id).single();
-      if (supp) {
-        await supabase.from('suppliers').update({ balance: (supp.balance || 0) + (txn.amount || 0) }).eq('id', txn.supplier_id);
+      if (txn.supplier_id && txn.primary_mode === 'supplier') {
+        await adjustSupplierBalance(txn.supplier_id, txn.amount || 0);
       }
+    } else if (txn.type === 'customer_payment' && txn.customer_id) {
+      if (txn.description?.startsWith('Advance from')) {
+        await adjustCustomerAdvance(txn.customer_id, -(txn.amount || 0));
+      } else {
+        await adjustCustomerCredit(txn.customer_id, txn.amount || 0);
+      }
+    } else if (txn.type === 'supplier_payment' && txn.supplier_id) {
+      await adjustSupplierBalance(txn.supplier_id, txn.amount || 0);
+    } else if (txn.type === 'supplier_invoice' && txn.supplier_id) {
+      await adjustSupplierBalance(txn.supplier_id, -(txn.amount || 0));
+    } else if (txn.type === 'expense') {
+      if (txn.supplier_id && (txn.category === 'supplier_payment' || txn.category === 'stock')) {
+        await adjustSupplierBalance(txn.supplier_id, txn.amount || 0);
+      }
+      if (txn.loan_id) {
+        await adjustLoanBalance(txn.loan_id, -(txn.amount || 0));
+      }
+    } else if (txn.type === 'loan_payment' && txn.loan_id) {
+      await adjustLoanBalance(txn.loan_id, -(txn.amount || 0));
     }
 
     await supabase.from('transactions').update({ is_void: true, void_reason: 'Deleted from ledger' }).eq('id', id);
@@ -177,12 +194,47 @@ export default function LedgerModal({
 
   async function handleUpdateEntry() {
     if (!editingEntry) return;
+    const txn = entries.find((e) => e.id === editingEntry);
+    if (!txn) return;
 
-    await supabase.from('transactions').update({
-      amount: parseFloat(editForm.amount),
+    const newAmount = parseFloat(editForm.amount);
+    const delta = newAmount - (txn.amount || 0);
+
+    const updatePayload: Record<string, unknown> = {
+      amount: newAmount,
       notes: editForm.notes || null,
       edited_at: new Date().toISOString(),
-    }).eq('id', editingEntry);
+    };
+    // Sales totals/profit read selling_price, not amount - keep them in sync
+    if (txn.type === 'sale') {
+      updatePayload.selling_price = newAmount;
+    }
+
+    await supabase.from('transactions').update(updatePayload).eq('id', editingEntry);
+
+    // Keep any linked balance in sync with the amount change instead of
+    // letting it silently drift out of step with the edited transaction
+    if (delta !== 0) {
+      if (txn.type === 'sale') {
+        if (txn.customer_id && txn.primary_mode === 'credit') await adjustCustomerCredit(txn.customer_id, delta);
+        if (txn.customer_id && txn.primary_mode === 'advance') await adjustCustomerAdvance(txn.customer_id, -delta);
+        if (txn.supplier_id && txn.primary_mode === 'supplier') await adjustSupplierBalance(txn.supplier_id, -delta);
+      } else if (txn.type === 'customer_payment' && txn.customer_id) {
+        if (txn.description?.startsWith('Advance from')) await adjustCustomerAdvance(txn.customer_id, delta);
+        else await adjustCustomerCredit(txn.customer_id, -delta);
+      } else if (txn.type === 'supplier_payment' && txn.supplier_id) {
+        await adjustSupplierBalance(txn.supplier_id, -delta);
+      } else if (txn.type === 'supplier_invoice' && txn.supplier_id) {
+        await adjustSupplierBalance(txn.supplier_id, delta);
+      } else if (txn.type === 'expense') {
+        if (txn.supplier_id && (txn.category === 'supplier_payment' || txn.category === 'stock')) {
+          await adjustSupplierBalance(txn.supplier_id, -delta);
+        }
+        if (txn.loan_id) await adjustLoanBalance(txn.loan_id, delta);
+      } else if (txn.type === 'loan_payment' && txn.loan_id) {
+        await adjustLoanBalance(txn.loan_id, delta);
+      }
+    }
 
     setEditingEntry(null);
     fetchEntries();

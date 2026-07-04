@@ -266,6 +266,12 @@ export default function Reports() {
       } else if (t.type === 'loan_payment') {
         totalOut += t.amount;
         loanPaymentTotal += t.amount;
+      } else if (t.type === 'partner_loan' || t.type === 'capital_entry') {
+        // Money a partner puts into (or returns to) the shop
+        totalIn += t.amount;
+      } else if (t.type === 'supplier_invoice') {
+        // New debt owed to a supplier - not cash out yet, but tracked here as it is elsewhere
+        totalOut += t.amount;
       }
     });
 
@@ -313,10 +319,10 @@ export default function Reports() {
   }
 
   function getDebitCredit(txn: Transaction) {
-    if (txn.type === 'sale' || txn.type === 'customer_payment') {
+    if (txn.type === 'sale' || txn.type === 'customer_payment' || txn.type === 'partner_loan' || txn.type === 'capital_entry') {
       return { debit: 0, credit: txn.amount };
     }
-    if (txn.type === 'expense' || txn.type === 'supplier_payment' || txn.type === 'partner_draw' || txn.type === 'loan_payment') {
+    if (txn.type === 'expense' || txn.type === 'supplier_payment' || txn.type === 'partner_draw' || txn.type === 'loan_payment' || txn.type === 'supplier_invoice') {
       return { debit: txn.amount, credit: 0 };
     }
     if (txn.type === 'fund_transfer') {
