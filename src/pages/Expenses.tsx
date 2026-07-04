@@ -257,8 +257,9 @@ export default function Expenses() {
     const txn = expenses.find((e) => e.id === id);
     if (!txn) return;
 
-    // Reverse supplier balance
-    if (txn.supplier_id && (txn.category === 'supplier_payment' || txn.category === 'stock')) {
+    // Reverse supplier balance - covers a supplier-payment TYPE transaction (paid via
+    // the Suppliers tab) as well as a stock/supplier_payment CATEGORY expense
+    if (txn.supplier_id && (txn.type === 'supplier_payment' || txn.category === 'supplier_payment' || txn.category === 'stock')) {
       await adjustSupplierBalance(txn.supplier_id, txn.amount || 0);
     }
 
@@ -289,8 +290,9 @@ export default function Expenses() {
       partnerId: expense.partner_id || '',
       source: source as 'shop' | 'own_pocket',
     });
-    if (isHome) setActiveTab('home');
-    else if (expense.loan_id) setActiveTab('loans');
+    if (expense.type === 'supplier_payment') setActiveTab('suppliers');
+    else if (expense.type === 'loan_payment') setActiveTab('loans');
+    else if (isHome) setActiveTab('home');
     else setActiveTab('shop');
     setShowAdd(true);
   }
@@ -301,6 +303,52 @@ export default function Expenses() {
     if (!oldTxn) return;
 
     const amt = parseFloat(form.amount);
+
+    // Supplier payment and loan payment are their own transaction types - edit them
+    // in place instead of falling through to the generic expense path below, which
+    // would otherwise overwrite `type` with 'expense' and corrupt the record.
+    if (oldTxn.type === 'supplier_payment') {
+      if (oldTxn.supplier_id) await adjustSupplierBalance(oldTxn.supplier_id, oldTxn.amount || 0);
+      await supabase.from('transactions').update({
+        date: form.date,
+        primary_mode: form.mode,
+        amount: amt,
+        supplier_id: form.supplierId || null,
+        description: form.description || null,
+        notes: form.notes || null,
+        edited_at: new Date().toISOString(),
+      }).eq('id', editingId);
+      if (form.supplierId) await adjustSupplierBalance(form.supplierId, -amt);
+
+      setEditingId(null);
+      setForm(emptyForm);
+      setShowAdd(false);
+      fetchData();
+      triggerRefresh();
+      return;
+    }
+
+    if (oldTxn.type === 'loan_payment') {
+      if (oldTxn.loan_id) await adjustLoanBalance(oldTxn.loan_id, -(oldTxn.amount || 0));
+      await supabase.from('transactions').update({
+        date: form.date,
+        primary_mode: form.mode,
+        amount: amt,
+        loan_id: form.loanId || null,
+        description: form.description || null,
+        notes: form.notes || null,
+        edited_at: new Date().toISOString(),
+      }).eq('id', editingId);
+      if (form.loanId) await adjustLoanBalance(form.loanId, amt);
+
+      setEditingId(null);
+      setForm(emptyForm);
+      setShowAdd(false);
+      fetchData();
+      triggerRefresh();
+      return;
+    }
+
     const isHomeExpense = activeTab === 'home';
     const category = isHomeExpense ? 'home_expense' : form.category;
     const isPartnerExpense = category === 'taher' || category === 'abdulqadir';

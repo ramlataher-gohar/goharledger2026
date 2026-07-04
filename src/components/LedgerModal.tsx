@@ -177,6 +177,10 @@ export default function LedgerModal({
       }
     } else if (txn.type === 'loan_payment' && txn.loan_id) {
       await adjustLoanBalance(txn.loan_id, -(txn.amount || 0));
+    } else if (txn.type === 'capital_entry' && txn.transaction_id.startsWith('CAP-')) {
+      // Capital entries are mirrored here from the Capital page - keep the
+      // actual record in sync instead of only voiding the mirror
+      await supabase.from('capital_entries').delete().eq('id', txn.transaction_id.slice(4));
     }
 
     await supabase.from('transactions').update({ is_void: true, void_reason: 'Deleted from ledger' }).eq('id', id);
@@ -211,6 +215,15 @@ export default function LedgerModal({
     }
 
     await supabase.from('transactions').update(updatePayload).eq('id', editingEntry);
+
+    // Capital entries are mirrored here from the Capital page - keep the
+    // actual record in sync with whatever was just edited on the mirror
+    if (txn.type === 'capital_entry' && txn.transaction_id.startsWith('CAP-')) {
+      await supabase.from('capital_entries').update({
+        amount: newAmount,
+        description: editForm.notes || null,
+      }).eq('id', txn.transaction_id.slice(4));
+    }
 
     // Keep any linked balance in sync with the amount change instead of
     // letting it silently drift out of step with the edited transaction
