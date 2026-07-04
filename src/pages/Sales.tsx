@@ -56,7 +56,7 @@ const emptyForm: SaleForm = {
 };
 
 export default function Sales() {
-  const { triggerRefresh } = useDataRefresh();
+  const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
   const [sales, setSales] = useState<Transaction[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -79,7 +79,7 @@ export default function Sales() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [refreshKey]);
 
   async function fetchData() {
     setLoading(true);

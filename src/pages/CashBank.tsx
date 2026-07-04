@@ -33,7 +33,7 @@ const emptyTransfer: TransferForm = {
 };
 
 export default function CashBank() {
-  const { triggerRefresh } = useDataRefresh();
+  const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [splits, setSplits] = useState<{ transaction_id: string; mode: string; amount: number }[]>([]);
@@ -47,7 +47,7 @@ export default function CashBank() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [refreshKey]);
 
   async function fetchData() {
     setLoading(true);

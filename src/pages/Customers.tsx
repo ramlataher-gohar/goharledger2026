@@ -51,7 +51,7 @@ const emptyPayment: PaymentForm = {
 };
 
 export default function Customers() {
-  const { triggerRefresh } = useDataRefresh();
+  const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -67,7 +67,14 @@ export default function Customers() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [refreshKey]);
+
+  useEffect(() => {
+    if (selectedCustomer) {
+      const updated = customers.find((c) => c.id === selectedCustomer.id);
+      if (updated) setSelectedCustomer(updated);
+    }
+  }, [customers]);
 
   async function fetchData() {
     setLoading(true);

@@ -45,7 +45,7 @@ const emptyForm: ExpenseForm = {
 };
 
 export default function Expenses() {
-  const { triggerRefresh } = useDataRefresh();
+  const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'shop' | 'home' | 'loans' | 'suppliers'>('shop');
   const [expenses, setExpenses] = useState<Transaction[]>([]);
@@ -66,7 +66,7 @@ export default function Expenses() {
 
   useEffect(() => {
     fetchData();
-  }, [activeTab]);
+  }, [activeTab, refreshKey]);
 
   async function fetchData() {
     setLoading(true);

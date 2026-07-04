@@ -13,6 +13,7 @@ import LedgerModal from '../components/LedgerModal';
 import type { Transaction, ShareRule, HistoricalProfit } from '../types';
 
 export default function ProfitLoss() {
+  const { refreshKey } = useDataRefresh();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [shareRules, setShareRules] = useState<ShareRule[]>([]);
   const [historicalProfit, setHistoricalProfit] = useState<HistoricalProfit[]>([]);
@@ -27,7 +28,7 @@ export default function ProfitLoss() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [refreshKey]);
 
   async function fetchData() {
     setLoading(true);
@@ -94,7 +95,7 @@ export default function ProfitLoss() {
     const grossProfit = totalSP - totalCP - totalCommission;
 
     const shopExpenses = monthTxns
-      .filter((t) => t.type === 'expense' && t.category !== 'home_expense')
+      .filter((t) => t.type === 'expense' && t.category !== 'home_expense' && t.category !== 'stock' && t.category !== 'supplier_payment')
       .reduce((s, t) => s + t.amount, 0);
 
     const homeExpensesFromShop = monthTxns

@@ -31,7 +31,7 @@ const emptyDraw: DrawForm = {
 };
 
 export default function Partners() {
-  const { triggerRefresh } = useDataRefresh();
+  const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
   const [activePartner, setActivePartner] = useState<'taher' | 'abdulqadir'>('taher');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -47,7 +47,7 @@ export default function Partners() {
 
   useEffect(() => {
     fetchData();
-  }, [activePartner]);
+  }, [activePartner, refreshKey]);
 
   async function fetchData() {
     setLoading(true);

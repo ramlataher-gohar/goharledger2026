@@ -28,7 +28,7 @@ export default function LedgerModal({
   filterPartnerId,
   filterLoanId,
 }: LedgerModalProps) {
-  const { triggerRefresh } = useDataRefresh();
+  const { refreshKey, triggerRefresh } = useDataRefresh();
   const [entries, setEntries] = useState<Transaction[]>([]);
   const [splits, setSplits] = useState<{ transaction_id: string; mode: string; amount: number }[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -50,7 +50,7 @@ export default function LedgerModal({
     if (open && fromDate && toDate) {
       fetchEntries();
     }
-  }, [open, dateFilter, fromDate, toDate]);
+  }, [open, dateFilter, fromDate, toDate, refreshKey]);
 
   function updateDateRange(filter: DateFilterType) {
     const today = new Date();

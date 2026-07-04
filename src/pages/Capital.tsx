@@ -41,7 +41,7 @@ const emptyCapital: CapitalForm = {
 };
 
 export default function Capital() {
-  const { triggerRefresh } = useDataRefresh();
+  const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
   const [capitalEntries, setCapitalEntries] = useState<CapitalEntry[]>([]);
   const [loans, setLoans] = useState<LoanTracker[]>([]);
@@ -85,7 +85,7 @@ export default function Capital() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [refreshKey]);
 
   async function fetchData() {
     setLoading(true);

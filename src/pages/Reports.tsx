@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
 import { formatKES, formatDate, getMonthLabel } from '../utils/format';
+import { useDataRefresh } from '../context/DataContext';
 import type { Transaction, Customer, Supplier, ExpenseCategory } from '../types';
 
 interface ReportFilters {
@@ -55,6 +56,7 @@ const entityTypes = [
 ];
 
 export default function Reports() {
+  const { refreshKey } = useDataRefresh();
   const [filters, setFilters] = useState<ReportFilters>(emptyFilters);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [splits, setSplits] = useState<{ transaction_id: string; mode: string; amount: number }[]>([]);
@@ -74,7 +76,7 @@ export default function Reports() {
     if (filters.fromDate && filters.toDate) {
       fetchData();
     }
-  }, [filters]);
+  }, [filters, refreshKey]);
 
   async function fetchReferenceData() {
     const [{ data: c }, { data: s }, { data: ec }] = await Promise.all([
@@ -230,6 +232,7 @@ export default function Reports() {
     let totalOut = 0;
     let salesTotal = 0;
     let costTotal = 0;
+    let commissionTotal = 0;
     let expenseTotal = 0;
     let shopExpenseTotal = 0;
     let homeExpenseTotal = 0;
@@ -241,16 +244,19 @@ export default function Reports() {
     transactions.forEach((t) => {
       if (t.type === 'sale') {
         totalIn += t.amount;
-        salesTotal += t.amount;
+        salesTotal += t.selling_price || t.amount;
         costTotal += t.cost_price || 0;
+        commissionTotal += t.commission || 0;
       } else if (t.type === 'customer_payment') {
         totalIn += t.amount;
         customerCollectionTotal += t.amount;
       } else if (t.type === 'expense') {
         totalOut += t.amount;
         expenseTotal += t.amount;
+        // Stock/supplier payments made via the expense form are not shop overhead expenses
+        const isSupplierPayment = t.category === 'supplier_payment' || t.category === 'stock';
         if (t.category === 'home_expense') homeExpenseTotal += t.amount;
-        else shopExpenseTotal += t.amount;
+        else if (!isSupplierPayment) shopExpenseTotal += t.amount;
       } else if (t.type === 'supplier_payment') {
         totalOut += t.amount;
         supplierPaymentTotal += t.amount;
@@ -263,7 +269,7 @@ export default function Reports() {
       }
     });
 
-    const grossProfit = salesTotal - costTotal;
+    const grossProfit = salesTotal - costTotal - commissionTotal;
     const netProfit = grossProfit - shopExpenseTotal - homeExpenseTotal - partnerDrawTotal;
 
     return {

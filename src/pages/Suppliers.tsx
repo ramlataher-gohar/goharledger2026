@@ -63,7 +63,7 @@ const emptyPayment: PaymentForm = {
 };
 
 export default function Suppliers() {
-  const { triggerRefresh } = useDataRefresh();
+  const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -81,7 +81,14 @@ export default function Suppliers() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [refreshKey]);
+
+  useEffect(() => {
+    if (selectedSupplier) {
+      const updated = suppliers.find((s) => s.id === selectedSupplier.id);
+      if (updated) setSelectedSupplier(updated);
+    }
+  }, [suppliers]);
 
   async function fetchData() {
     setLoading(true);
