@@ -98,16 +98,37 @@ export default function Customers() {
     triggerRefresh();
   }
 
+  function openingAdvanceTxnId(customerId: string) {
+    return `OPN-ADV-${customerId}`;
+  }
+
   async function handleSaveCustomer() {
     if (!form.name.trim()) return;
 
-    await supabase.from('customers').insert({
+    const openingAdvance = parseFloat(form.advanceBalance || '0');
+
+    const { data: newCustomer } = await supabase.from('customers').insert({
       name: form.name.trim(),
       phone: form.phone || null,
       credit_limit: parseFloat(form.creditLimit || '0'),
-      advance_balance: parseFloat(form.advanceBalance || '0'),
+      advance_balance: openingAdvance,
       notes: form.notes || null,
-    });
+    }).select().single();
+
+    // Mirror a nonzero opening advance into transactions so it shows up in
+    // Reports/the Ledger with a visible origin, and can be edited/deleted later
+    if (newCustomer && openingAdvance > 0) {
+      await supabase.from('transactions').insert({
+        transaction_id: openingAdvanceTxnId(newCustomer.id),
+        date: todayStr(),
+        type: 'customer_payment',
+        primary_mode: null,
+        amount: openingAdvance,
+        customer_id: newCustomer.id,
+        description: `Opening advance - ${newCustomer.name}`,
+        created_by: user?.username || null,
+      });
+    }
 
     setForm(emptyCustomer);
     setShowAdd(false);
@@ -122,9 +143,39 @@ export default function Customers() {
       name: form.name.trim(),
       phone: form.phone || null,
       credit_limit: parseFloat(form.creditLimit || '0'),
-      advance_balance: parseFloat(form.advanceBalance || '0'),
       notes: form.notes || null,
     }).eq('id', selectedCustomer.id);
+
+    // Keep the opening advance in sync by delta, not by overwriting the whole
+    // balance - any real advance payments/usage recorded since should not be wiped out
+    const txnId = openingAdvanceTxnId(selectedCustomer.id);
+    const existing = transactions.find((t) => t.transaction_id === txnId);
+    const oldOpening = existing?.amount || 0;
+    const newOpening = parseFloat(form.advanceBalance || '0');
+    const delta = newOpening - oldOpening;
+
+    if (delta !== 0) {
+      await adjustCustomerAdvance(selectedCustomer.id, delta);
+    }
+
+    if (existing) {
+      if (newOpening > 0) {
+        await supabase.from('transactions').update({ amount: newOpening, edited_at: new Date().toISOString() }).eq('id', existing.id);
+      } else {
+        await supabase.from('transactions').update({ is_void: true, void_reason: 'Opening advance removed' }).eq('id', existing.id);
+      }
+    } else if (newOpening > 0) {
+      await supabase.from('transactions').insert({
+        transaction_id: txnId,
+        date: todayStr(),
+        type: 'customer_payment',
+        primary_mode: null,
+        amount: newOpening,
+        customer_id: selectedCustomer.id,
+        description: `Opening advance - ${form.name.trim()}`,
+        created_by: user?.username || null,
+      });
+    }
 
     setShowEdit(false);
     fetchData();
@@ -236,11 +287,12 @@ export default function Customers() {
 
   function startEditCustomer(c: Customer) {
     setSelectedCustomer(c);
+    const opening = transactions.find((t) => t.transaction_id === openingAdvanceTxnId(c.id));
     setForm({
       name: c.name,
       phone: c.phone || '',
       creditLimit: String(c.credit_limit || ''),
-      advanceBalance: String(c.advance_balance || ''),
+      advanceBalance: String(opening?.amount || 0),
       notes: c.notes || '',
     });
     setShowEdit(true);
@@ -372,7 +424,7 @@ export default function Customers() {
                 type="number"
                 value={form.advanceBalance}
                 onChange={(e) => setForm({ ...form, advanceBalance: e.target.value })}
-                placeholder="Advance Balance"
+                placeholder="Opening Advance"
                 className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
             </div>

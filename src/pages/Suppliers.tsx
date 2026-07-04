@@ -22,6 +22,7 @@ interface SupplierForm {
   phone: string;
   notes: string;
   isDualParty: boolean;
+  openingBalance: string;
 }
 
 interface InvoiceForm {
@@ -45,6 +46,7 @@ const emptySupplier: SupplierForm = {
   phone: '',
   notes: '',
   isDualParty: false,
+  openingBalance: '',
 };
 
 const emptyInvoice: InvoiceForm = {
@@ -112,8 +114,14 @@ export default function Suppliers() {
     triggerRefresh();
   }
 
+  function openingBalanceTxnId(supplierId: string) {
+    return `OPN-BAL-${supplierId}`;
+  }
+
   async function handleSaveSupplier() {
     if (!form.name.trim()) return;
+
+    const newOpening = parseFloat(form.openingBalance || '0');
 
     if (editingId) {
       await supabase.from('suppliers').update({
@@ -122,13 +130,59 @@ export default function Suppliers() {
         notes: form.notes || null,
         is_dual_party: form.isDualParty,
       }).eq('id', editingId);
+
+      // Keep the opening balance in sync by delta, not by overwriting the whole
+      // balance - any real invoices/payments recorded since should not be wiped out
+      const txnId = openingBalanceTxnId(editingId);
+      const existing = transactions.find((t) => t.transaction_id === txnId);
+      const oldOpening = existing?.amount || 0;
+      const delta = newOpening - oldOpening;
+
+      if (delta !== 0) {
+        await adjustSupplierBalance(editingId, delta);
+      }
+
+      if (existing) {
+        if (newOpening > 0) {
+          await supabase.from('transactions').update({ amount: newOpening, edited_at: new Date().toISOString() }).eq('id', existing.id);
+        } else {
+          await supabase.from('transactions').update({ is_void: true, void_reason: 'Opening balance removed' }).eq('id', existing.id);
+        }
+      } else if (newOpening > 0) {
+        await supabase.from('transactions').insert({
+          transaction_id: txnId,
+          date: todayStr(),
+          type: 'supplier_invoice',
+          primary_mode: null,
+          amount: newOpening,
+          supplier_id: editingId,
+          description: `Opening balance - ${form.name.trim()}`,
+          created_by: user?.username || null,
+        });
+      }
     } else {
-      await supabase.from('suppliers').insert({
+      const { data: newSupplier } = await supabase.from('suppliers').insert({
         name: form.name.trim(),
         phone: form.phone || null,
         notes: form.notes || null,
         is_dual_party: form.isDualParty,
-      });
+        balance: newOpening,
+      }).select().single();
+
+      // Mirror a nonzero opening balance into transactions so it shows up in
+      // Reports/the Ledger with a visible origin, and can be edited/deleted later
+      if (newSupplier && newOpening > 0) {
+        await supabase.from('transactions').insert({
+          transaction_id: openingBalanceTxnId(newSupplier.id),
+          date: todayStr(),
+          type: 'supplier_invoice',
+          primary_mode: null,
+          amount: newOpening,
+          supplier_id: newSupplier.id,
+          description: `Opening balance - ${newSupplier.name}`,
+          created_by: user?.username || null,
+        });
+      }
     }
 
     setForm(emptySupplier);
@@ -255,11 +309,13 @@ export default function Suppliers() {
 
   function startEdit(supplier: Supplier) {
     setEditingId(supplier.id);
+    const opening = transactions.find((t) => t.transaction_id === openingBalanceTxnId(supplier.id));
     setForm({
       name: supplier.name,
       phone: supplier.phone || '',
       notes: supplier.notes || '',
       isDualParty: supplier.is_dual_party,
+      openingBalance: String(opening?.amount || 0),
     });
     setShowAdd(true);
   }
@@ -326,6 +382,13 @@ export default function Suppliers() {
                 className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
             </div>
+            <input
+              type="number"
+              value={form.openingBalance}
+              onChange={(e) => setForm({ ...form, openingBalance: e.target.value })}
+              placeholder="Opening Balance (amount owed)"
+              className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+            />
             <input
               type="text"
               value={form.notes}

@@ -133,12 +133,27 @@ export default function Sales() {
 
   async function handleQuickAddSupplier() {
     if (!quickSupplier.name) return;
+    const openingBalance = parseFloat(quickSupplier.balance || '0');
     const { data } = await supabase.from('suppliers').insert({
       name: quickSupplier.name,
       phone: quickSupplier.phone || null,
-      balance: parseFloat(quickSupplier.balance || '0'),
+      balance: openingBalance,
     }).select().single();
     if (data) {
+      // Mirror a nonzero opening balance into transactions so it shows up in
+      // Reports/the Ledger with a visible origin, and can be edited/deleted later
+      if (openingBalance > 0) {
+        await supabase.from('transactions').insert({
+          transaction_id: `OPN-BAL-${data.id}`,
+          date: todayStr(),
+          type: 'supplier_invoice',
+          primary_mode: null,
+          amount: openingBalance,
+          supplier_id: data.id,
+          description: `Opening balance - ${data.name}`,
+          created_by: user?.username || null,
+        });
+      }
       setSuppliers((prev) => [...prev, data]);
       setForm((f) => ({ ...f, supplierId: data.id }));
       setShowQuickAddSupplier(false);
