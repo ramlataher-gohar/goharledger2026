@@ -316,6 +316,7 @@ export default function Capital() {
       abdulqadir_taken: abdulqadirTaken,
       retained: retained,
       notes: historicalForm.notes || null,
+      created_by: user?.username || null,
     });
 
     setHistoricalForm({
@@ -622,7 +623,14 @@ export default function Capital() {
                     <td className="px-4 py-2 capitalize font-medium text-slate-800">{c.partner_id}</td>
                     <td className="px-4 py-2"><span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">{c.entry_type.replace('_', ' ')}</span></td>
                     <td className="px-4 py-2 text-right font-medium">{formatKES(c.amount)}</td>
-                    <td className="px-4 py-2 text-slate-500">{c.description || '-'}</td>
+                    <td className="px-4 py-2 text-slate-500">
+                      {c.description || '-'}
+                      {c.created_by && (
+                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title="Added by">
+                          {c.created_by}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-center">
                       <div className="flex items-center justify-center gap-1">
                         <button onClick={() => startEditCapital(c)} className="p-1 hover:bg-slate-200 rounded"><Edit2 size={14} className="text-slate-500" /></button>
@@ -753,7 +761,14 @@ export default function Capital() {
               ) : (
                 historicalProfit.map((h) => (
                   <tr key={h.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-2 font-medium">{getMonthLabel(h.month)}</td>
+                    <td className="px-4 py-2 font-medium">
+                      {getMonthLabel(h.month)}
+                      {h.created_by && (
+                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-normal" title="Added by">
+                          {h.created_by}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-right font-medium">{formatKES(h.total_profit)}</td>
                     <td className="px-4 py-2 text-right">{formatKES(h.taher_share || 0)}</td>
                     <td className="px-4 py-2 text-right">{formatKES(h.abdulqadir_share || 0)}</td>

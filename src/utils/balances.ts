@@ -6,21 +6,28 @@ import { supabase } from './supabase';
 // the same record happen in close succession (e.g. two invoices added
 // back-to-back before the screen has refreshed).
 
+// Suppliers/customers balances are allowed to go negative on purpose: a negative
+// supplier balance means the supplier owes the shop (e.g. a supplier-mode sale
+// recorded before any invoice existed to offset it against), and a negative
+// customer credit/advance balance means the shop owes the customer. Flooring at
+// zero used to silently discard that credit instead of letting it carry forward
+// and net out against the next invoice/sale - callers that display these values
+// should style a negative balance as a credit, not just a bare negative number.
 export async function adjustSupplierBalance(supplierId: string, delta: number): Promise<void> {
   const { data } = await supabase.from('suppliers').select('balance').eq('id', supplierId).single();
-  const next = Math.max(0, (data?.balance || 0) + delta);
+  const next = (data?.balance || 0) + delta;
   await supabase.from('suppliers').update({ balance: next }).eq('id', supplierId);
 }
 
 export async function adjustCustomerCredit(customerId: string, delta: number): Promise<void> {
   const { data } = await supabase.from('customers').select('credit_balance').eq('id', customerId).single();
-  const next = Math.max(0, (data?.credit_balance || 0) + delta);
+  const next = (data?.credit_balance || 0) + delta;
   await supabase.from('customers').update({ credit_balance: next }).eq('id', customerId);
 }
 
 export async function adjustCustomerAdvance(customerId: string, delta: number): Promise<void> {
   const { data } = await supabase.from('customers').select('advance_balance').eq('id', customerId).single();
-  const next = Math.max(0, (data?.advance_balance || 0) + delta);
+  const next = (data?.advance_balance || 0) + delta;
   await supabase.from('customers').update({ advance_balance: next }).eq('id', customerId);
 }
 

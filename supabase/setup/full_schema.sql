@@ -602,4 +602,25 @@ ALTER TABLE transactions ADD COLUMN IF NOT EXISTS due_date DATE;
 */
 ALTER TABLE transactions ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 
+-- ===== 20260706120000_add_settlement_mode_and_opening_balance_support.sql =====
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS settlement_mode text;
+
+UPDATE transactions
+SET settlement_mode = primary_mode,
+    primary_mode = 'advance'
+WHERE type = 'sale'
+  AND primary_mode <> 'advance'
+  AND notes LIKE 'Advance payment via%';
+
+-- ===== 20260706120100_seed_users_table.sql =====
+INSERT INTO users (username, password_hash, role, full_name, is_active)
+VALUES
+  ('taher', '9b7e94eed4b42296a9057e49f6bfa4eed80db9f70e4e438591ef6d1f1d4d30a9', 'admin', 'Taher', true),
+  ('abdulqadir', '26f8c14ddb53966a2cf5759051fe5edb257610701ef647df083ba6321383d8b6', 'admin', 'Abdulqadir', true)
+ON CONFLICT (username) DO NOTHING;
+
+-- ===== 20260706120200_add_created_by_to_capital_and_historical.sql =====
+ALTER TABLE capital_entries ADD COLUMN IF NOT EXISTS created_by text;
+ALTER TABLE historical_profit ADD COLUMN IF NOT EXISTS created_by text;
+
 

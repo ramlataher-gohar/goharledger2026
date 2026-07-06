@@ -33,7 +33,9 @@ const emptyDraw: DrawForm = {
 export default function Partners() {
   const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
-  const [activePartner, setActivePartner] = useState<'taher' | 'abdulqadir'>('taher');
+  const [activePartner, setActivePartner] = useState<'taher' | 'abdulqadir'>(
+    user?.username === 'abdulqadir' ? 'abdulqadir' : 'taher'
+  );
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [historicalProfit, setHistoricalProfit] = useState<HistoricalProfit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -251,6 +253,7 @@ export default function Partners() {
       date: t.date,
       description: t.description || 'Home expense',
       amount: t.amount,
+      createdBy: t.created_by,
       status: transactions.some((tx) => tx.notes?.includes(t.id) && tx.type === 'expense') ? 'taken' : 'pending',
     }));
 
@@ -290,10 +293,10 @@ export default function Partners() {
 
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-3">
-        <button onClick={() => { setShowDraw(true); setDrawForm({ ...emptyDraw, date: todayStr(), partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : activePartner }); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <button onClick={() => { setShowDraw(true); setDrawForm({ ...emptyDraw, date: todayStr() }); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <ArrowDownCircle size={16} /> Take Money
         </button>
-        <button onClick={() => { setShowReturn(true); setReturnForm({ ...emptyDraw, date: todayStr(), partnerId: user?.username === 'taher' ? 'taher' : user?.username === 'abdulqadir' ? 'abdulqadir' : activePartner }); }} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <button onClick={() => { setShowReturn(true); setReturnForm({ ...emptyDraw, date: todayStr() }); }} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
           <ArrowUpCircle size={16} /> Return Money
         </button>
         <button onClick={() => setShowLedger(true)} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
@@ -449,7 +452,14 @@ export default function Partners() {
                 homeExpenses.map((he) => (
                   <tr key={he.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-2 text-slate-600">{formatDate(he.date)}</td>
-                    <td className="px-4 py-2 text-slate-700">{he.description}</td>
+                    <td className="px-4 py-2 text-slate-700">
+                      {he.description}
+                      {he.createdBy && (
+                        <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title="Added by">
+                          {he.createdBy}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-right font-medium">{formatKES(he.amount)}</td>
                     <td className="px-4 py-2">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${
