@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Fragment } from 'react';
 import {
   Plus,
   Search,
@@ -24,6 +24,17 @@ interface CustomerForm {
   phone: string;
   creditLimit: string;
   advanceBalance: string;
+  openingCredit: string;
+  notes: string;
+}
+
+interface SaleEditForm {
+  date: string;
+  sellingPrice: string;
+  costPrice: string;
+  commission: string;
+  commissionMode: string;
+  settlementMode: string;
   notes: string;
 }
 
@@ -40,6 +51,17 @@ const emptyCustomer: CustomerForm = {
   phone: '',
   creditLimit: '',
   advanceBalance: '',
+  openingCredit: '',
+  notes: '',
+};
+
+const emptySaleEdit: SaleEditForm = {
+  date: '',
+  sellingPrice: '',
+  costPrice: '',
+  commission: '',
+  commissionMode: 'cash',
+  settlementMode: 'cash',
   notes: '',
 };
 
@@ -65,6 +87,8 @@ export default function Customers() {
   const [paymentForm, setPaymentForm] = useState<PaymentForm>(emptyPayment);
   const [search, setSearch] = useState('');
   const [showLedger, setShowLedger] = useState(false);
+  const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
+  const [saleEditForm, setSaleEditForm] = useState<SaleEditForm>(emptySaleEdit);
 
   useEffect(() => {
     fetchData();
@@ -102,20 +126,26 @@ export default function Customers() {
     return `OPN-ADV-${customerId}`;
   }
 
+  function openingCreditTxnId(customerId: string) {
+    return `OPN-CR-${customerId}`;
+  }
+
   async function handleSaveCustomer() {
     if (!form.name.trim()) return;
 
     const openingAdvance = parseFloat(form.advanceBalance || '0');
+    const openingCredit = parseFloat(form.openingCredit || '0');
 
     const { data: newCustomer } = await supabase.from('customers').insert({
       name: form.name.trim(),
       phone: form.phone || null,
       credit_limit: parseFloat(form.creditLimit || '0'),
       advance_balance: openingAdvance,
+      credit_balance: openingCredit,
       notes: form.notes || null,
     }).select().single();
 
-    // Mirror a nonzero opening advance into transactions so it shows up in
+    // Mirror nonzero opening balances into transactions so they show up in
     // Reports/the Ledger with a visible origin, and can be edited/deleted later
     if (newCustomer && openingAdvance > 0) {
       await supabase.from('transactions').insert({
@@ -126,6 +156,18 @@ export default function Customers() {
         amount: openingAdvance,
         customer_id: newCustomer.id,
         description: `Opening advance - ${newCustomer.name}`,
+        created_by: user?.username || null,
+      });
+    }
+    if (newCustomer && openingCredit > 0) {
+      await supabase.from('transactions').insert({
+        transaction_id: openingCreditTxnId(newCustomer.id),
+        date: todayStr(),
+        type: 'opening_balance',
+        primary_mode: null,
+        amount: openingCredit,
+        customer_id: newCustomer.id,
+        description: `Opening balance owed - ${newCustomer.name}`,
         created_by: user?.username || null,
       });
     }
@@ -173,6 +215,36 @@ export default function Customers() {
         amount: newOpening,
         customer_id: selectedCustomer.id,
         description: `Opening advance - ${form.name.trim()}`,
+        created_by: user?.username || null,
+      });
+    }
+
+    // Same delta-sync pattern for the opening balance owed (credit)
+    const creditTxnId = openingCreditTxnId(selectedCustomer.id);
+    const existingCredit = transactions.find((t) => t.transaction_id === creditTxnId);
+    const oldOpeningCredit = existingCredit?.amount || 0;
+    const newOpeningCredit = parseFloat(form.openingCredit || '0');
+    const creditDelta = newOpeningCredit - oldOpeningCredit;
+
+    if (creditDelta !== 0) {
+      await adjustCustomerCredit(selectedCustomer.id, creditDelta);
+    }
+
+    if (existingCredit) {
+      if (newOpeningCredit > 0) {
+        await supabase.from('transactions').update({ amount: newOpeningCredit, edited_at: new Date().toISOString() }).eq('id', existingCredit.id);
+      } else {
+        await supabase.from('transactions').update({ is_void: true, void_reason: 'Opening balance removed' }).eq('id', existingCredit.id);
+      }
+    } else if (newOpeningCredit > 0) {
+      await supabase.from('transactions').insert({
+        transaction_id: creditTxnId,
+        date: todayStr(),
+        type: 'opening_balance',
+        primary_mode: null,
+        amount: newOpeningCredit,
+        customer_id: selectedCustomer.id,
+        description: `Opening balance owed - ${form.name.trim()}`,
         created_by: user?.username || null,
       });
     }
@@ -288,14 +360,72 @@ export default function Customers() {
   function startEditCustomer(c: Customer) {
     setSelectedCustomer(c);
     const opening = transactions.find((t) => t.transaction_id === openingAdvanceTxnId(c.id));
+    const openingCredit = transactions.find((t) => t.transaction_id === openingCreditTxnId(c.id));
     setForm({
       name: c.name,
       phone: c.phone || '',
       creditLimit: String(c.credit_limit || ''),
       advanceBalance: String(opening?.amount || 0),
+      openingCredit: String(openingCredit?.amount || 0),
       notes: c.notes || '',
     });
     setShowEdit(true);
+  }
+
+  function startEditSale(t: Transaction) {
+    setEditingSaleId(t.id);
+    setSaleEditForm({
+      date: t.date,
+      sellingPrice: String(t.selling_price || ''),
+      costPrice: String(t.cost_price || ''),
+      commission: String(t.commission || ''),
+      commissionMode: t.commission_mode || 'cash',
+      settlementMode: t.settlement_mode || 'cash',
+      notes: t.notes || '',
+    });
+  }
+
+  async function handleUpdateSale() {
+    if (!editingSaleId || !selectedCustomer) return;
+    const oldTxn = transactions.find((t) => t.id === editingSaleId);
+    if (!oldTxn) return;
+
+    const sp = parseFloat(saleEditForm.sellingPrice || '0');
+    const cp = parseFloat(saleEditForm.costPrice || '0');
+    const comm = parseFloat(saleEditForm.commission || '0');
+    const isAdvance = oldTxn.primary_mode === 'advance';
+
+    // Reverse the old effect, then apply the new one as a delta - keeps this
+    // correct even if a payment/spend happened on this customer in between.
+    if (isAdvance) {
+      await adjustCustomerAdvance(selectedCustomer.id, oldTxn.amount || 0);
+    } else {
+      await adjustCustomerCredit(selectedCustomer.id, -(oldTxn.amount || 0));
+    }
+
+    await supabase.from('transactions').update({
+      date: saleEditForm.date,
+      amount: sp,
+      selling_price: sp,
+      cost_price: cp || null,
+      commission: comm || null,
+      commission_mode: comm > 0 ? saleEditForm.commissionMode : null,
+      settlement_mode: isAdvance ? saleEditForm.settlementMode : oldTxn.settlement_mode,
+      notes: isAdvance
+        ? `Advance payment via ${saleEditForm.settlementMode}${saleEditForm.notes ? ' | ' + saleEditForm.notes : ''}`
+        : (saleEditForm.notes || null),
+      edited_at: new Date().toISOString(),
+    }).eq('id', editingSaleId);
+
+    if (isAdvance) {
+      await adjustCustomerAdvance(selectedCustomer.id, -sp);
+    } else {
+      await adjustCustomerCredit(selectedCustomer.id, sp);
+    }
+
+    setEditingSaleId(null);
+    setSaleEditForm(emptySaleEdit);
+    refreshCustomerData();
   }
 
   const filteredCustomers = customers.filter((c) =>
@@ -356,12 +486,19 @@ export default function Customers() {
                 className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <input
                 type="number"
                 value={form.creditLimit}
                 onChange={(e) => setForm({ ...form, creditLimit: e.target.value })}
                 placeholder="Credit Limit"
+                className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              />
+              <input
+                type="number"
+                value={form.openingCredit}
+                onChange={(e) => setForm({ ...form, openingCredit: e.target.value })}
+                placeholder="Opening Balance Owed"
                 className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
               <input
@@ -412,12 +549,19 @@ export default function Customers() {
                 className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <input
                 type="number"
                 value={form.creditLimit}
                 onChange={(e) => setForm({ ...form, creditLimit: e.target.value })}
                 placeholder="Credit Limit"
+                className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              />
+              <input
+                type="number"
+                value={form.openingCredit}
+                onChange={(e) => setForm({ ...form, openingCredit: e.target.value })}
+                placeholder="Opening Balance Owed"
                 className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
               <input
@@ -476,6 +620,9 @@ export default function Customers() {
                     {(c.credit_balance || 0) > 0 && (
                       <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full" title="Credit Owed">Cr: {formatKES(c.credit_balance)}</span>
                     )}
+                    {(c.credit_balance || 0) < 0 && (
+                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full" title="Shop owes customer">Owed: {formatKES(Math.abs(c.credit_balance))}</span>
+                    )}
                     {(c.advance_balance || 0) > 0 && (
                       <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full" title="Advance Paid">Adv: {formatKES(c.advance_balance)}</span>
                     )}
@@ -529,13 +676,17 @@ export default function Customers() {
 
               {/* Balance Cards */}
               <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="bg-red-50 rounded-lg p-3 border border-red-100">
+                <div className={`rounded-lg p-3 border ${(selectedCustomer.credit_balance || 0) < 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
                   <div className="flex items-center gap-2 mb-1">
-                    <CreditCard size={14} className="text-red-500" />
-                    <span className="text-xs text-red-600">Credit Balance</span>
+                    <CreditCard size={14} className={(selectedCustomer.credit_balance || 0) < 0 ? 'text-emerald-500' : 'text-red-500'} />
+                    <span className={`text-xs ${(selectedCustomer.credit_balance || 0) < 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {(selectedCustomer.credit_balance || 0) < 0 ? 'Shop Owes Customer' : 'Credit Balance'}
+                    </span>
                   </div>
-                  <p className="text-lg font-bold text-red-700">{formatKES(selectedCustomer.credit_balance || 0)}</p>
-                  {selectedCustomer.credit_limit > 0 && (
+                  <p className={`text-lg font-bold ${(selectedCustomer.credit_balance || 0) < 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {formatKES(Math.abs(selectedCustomer.credit_balance || 0))}
+                  </p>
+                  {selectedCustomer.credit_limit > 0 && (selectedCustomer.credit_balance || 0) >= 0 && (
                     <div className="w-full bg-red-200 rounded-full h-1.5 mt-1">
                       <div
                         className="bg-red-500 h-1.5 rounded-full"
@@ -582,14 +733,16 @@ export default function Customers() {
                       <th className="px-3 py-2">Mode</th>
                       <th className="px-3 py-2">Description</th>
                       <th className="px-3 py-2 text-right">Amount</th>
+                      <th className="px-3 py-2 text-center">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {getCustomerTransactions(selectedCustomer.id).length === 0 ? (
-                      <tr><td colSpan={5} className="px-3 py-4 text-center text-slate-400 text-xs">No transactions</td></tr>
+                      <tr><td colSpan={6} className="px-3 py-4 text-center text-slate-400 text-xs">No transactions</td></tr>
                     ) : (
                       getCustomerTransactions(selectedCustomer.id).map((t) => (
-                        <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                        <Fragment key={t.id}>
+                        <tr className="hover:bg-slate-50 transition-colors">
                           <td className="px-3 py-2 text-slate-600">{formatDate(t.date)}</td>
                           <td className="px-3 py-2">
                             <span className={`text-xs px-2 py-0.5 rounded-full ${
@@ -598,12 +751,19 @@ export default function Customers() {
                               t.type === 'customer_payment' ? 'bg-blue-100 text-blue-700' :
                               'bg-slate-100 text-slate-700'
                             }`}>
-                              {t.type === 'sale' ? (t.primary_mode === 'credit' ? 'Credit Sale' : 'Sale') : t.type.replace('_', ' ')}
+                              {t.type === 'sale' ? (t.primary_mode === 'credit' ? 'Credit Sale' : t.primary_mode === 'advance' ? 'Advance Sale' : 'Sale') : t.type.replace('_', ' ')}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-slate-600 text-xs capitalize">{t.primary_mode || '-'}</td>
+                          <td className="px-3 py-2 text-slate-600 text-xs capitalize">
+                            {t.primary_mode === 'advance' && t.settlement_mode ? `advance (${t.settlement_mode})` : (t.primary_mode || '-')}
+                          </td>
                           <td className="px-3 py-2 text-slate-700">
                             {t.notes || t.description || '-'}
+                            {t.created_by && (
+                              <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title="Added by">
+                                {t.created_by}
+                              </span>
+                            )}
                             {t.edited_at && (
                               <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Edited ${formatDate(t.edited_at)}`}>
                                 Edited
@@ -615,7 +775,81 @@ export default function Customers() {
                           }`}>
                             {t.type === 'sale' ? '+' : '-'}{formatKES(t.type === 'sale' ? (t.selling_price || t.amount) : t.amount)}
                           </td>
+                          <td className="px-3 py-2 text-center">
+                            {t.type === 'sale' && (t.primary_mode === 'credit' || t.primary_mode === 'advance') && (
+                              <button onClick={() => startEditSale(t)} className="p-1 hover:bg-slate-200 rounded">
+                                <Edit2 size={14} className="text-slate-500" />
+                              </button>
+                            )}
+                          </td>
                         </tr>
+                        {editingSaleId === t.id && (
+                          <tr>
+                            <td colSpan={6} className="px-3 py-3 bg-slate-50">
+                              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                <input
+                                  type="date"
+                                  value={saleEditForm.date}
+                                  onChange={(e) => setSaleEditForm({ ...saleEditForm, date: e.target.value })}
+                                  className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                                />
+                                <input
+                                  type="number"
+                                  value={saleEditForm.sellingPrice}
+                                  onChange={(e) => setSaleEditForm({ ...saleEditForm, sellingPrice: e.target.value })}
+                                  placeholder="Selling Price"
+                                  className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                                />
+                                <input
+                                  type="number"
+                                  value={saleEditForm.costPrice}
+                                  onChange={(e) => setSaleEditForm({ ...saleEditForm, costPrice: e.target.value })}
+                                  placeholder="Cost Price"
+                                  className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                                />
+                                <input
+                                  type="number"
+                                  value={saleEditForm.commission}
+                                  onChange={(e) => setSaleEditForm({ ...saleEditForm, commission: e.target.value })}
+                                  placeholder="Commission"
+                                  className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                                />
+                                <select
+                                  value={saleEditForm.commissionMode}
+                                  onChange={(e) => setSaleEditForm({ ...saleEditForm, commissionMode: e.target.value })}
+                                  className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                                >
+                                  <option value="cash">Commission: Cash</option>
+                                  <option value="mpesa">Commission: Mpesa</option>
+                                  <option value="paybill">Commission: Paybill</option>
+                                </select>
+                                {t.primary_mode === 'advance' && (
+                                  <select
+                                    value={saleEditForm.settlementMode}
+                                    onChange={(e) => setSaleEditForm({ ...saleEditForm, settlementMode: e.target.value })}
+                                    className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                                  >
+                                    <option value="cash">Settled via Cash</option>
+                                    <option value="mpesa">Settled via Mpesa</option>
+                                    <option value="paybill">Settled via Paybill</option>
+                                  </select>
+                                )}
+                                <input
+                                  type="text"
+                                  value={saleEditForm.notes}
+                                  onChange={(e) => setSaleEditForm({ ...saleEditForm, notes: e.target.value })}
+                                  placeholder="Notes"
+                                  className="col-span-2 border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                                />
+                              </div>
+                              <div className="flex gap-2 mt-2">
+                                <button onClick={handleUpdateSale} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded text-xs font-medium">Save</button>
+                                <button onClick={() => { setEditingSaleId(null); setSaleEditForm(emptySaleEdit); }} className="text-slate-500 hover:text-slate-700 text-xs">Cancel</button>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       ))
                     )}
                   </tbody>

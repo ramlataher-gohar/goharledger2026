@@ -12,10 +12,18 @@ import {
   Trash2,
   Download,
   X,
+  Wallet,
+  ArrowRight,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { supabase } from '../utils/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useDataRefresh } from '../context/DataContext';
+import { formatKES, todayStr } from '../utils/format';
+import { adjustCustomerCredit, adjustSupplierBalance } from '../utils/balances';
+import type { Customer, Supplier } from '../types';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -25,6 +33,7 @@ export default function Settings() {
 
   const tabs = [
     { id: 'profile', label: 'Business Profile', icon: Building2 },
+    { id: 'opening', label: 'Opening Balances', icon: Wallet },
     { id: 'users', label: 'User Management', icon: Users },
     { id: 'shares', label: 'Share Rules', icon: Percent },
     { id: 'notifications', label: 'Notifications', icon: Bell },
@@ -52,6 +61,7 @@ export default function Settings() {
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
         {activeTab === 'profile' && <BusinessProfile />}
+        {activeTab === 'opening' && <OpeningBalances navigate={navigate} triggerRefresh={triggerRefresh} />}
         {activeTab === 'users' && <UserManagement />}
         {activeTab === 'shares' && <ShareRulesSettings />}
         {activeTab === 'notifications' && <NotificationsSettings />}
@@ -130,30 +140,284 @@ function BusinessProfile() {
   );
 }
 
+function OpeningBalances({ navigate, triggerRefresh }: { navigate: (path: string) => void; triggerRefresh: () => void }) {
+  const { user } = useAuth();
+  const [cashAmounts, setCashAmounts] = useState({ cash: '', mpesa: '', paybill: '' });
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [customerId, setCustomerId] = useState('');
+  const [customerAmount, setCustomerAmount] = useState('');
+  const [supplierId, setSupplierId] = useState('');
+  const [supplierAmount, setSupplierAmount] = useState('');
+  const [saved, setSaved] = useState('');
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function load() {
+    const [{ data: cust }, { data: supp }, { data: opening }] = await Promise.all([
+      supabase.from('customers').select('*').eq('is_active', true).order('name'),
+      supabase.from('suppliers').select('*').eq('is_active', true).order('name'),
+      supabase.from('transactions').select('*').in('transaction_id', ['OPN-CASH', 'OPN-MPESA', 'OPN-PAYBILL']).eq('is_void', false),
+    ]);
+    setCustomers(cust || []);
+    setSuppliers(supp || []);
+    setCashAmounts({
+      cash: String(opening?.find((t) => t.transaction_id === 'OPN-CASH')?.amount || ''),
+      mpesa: String(opening?.find((t) => t.transaction_id === 'OPN-MPESA')?.amount || ''),
+      paybill: String(opening?.find((t) => t.transaction_id === 'OPN-PAYBILL')?.amount || ''),
+    });
+  }
+
+  async function saveCashBalance(mode: 'cash' | 'mpesa' | 'paybill') {
+    const amt = parseFloat(cashAmounts[mode] || '0');
+    const txnId = `OPN-${mode.toUpperCase()}`;
+    const { data: existing } = await supabase.from('transactions').select('*').eq('transaction_id', txnId).maybeSingle();
+
+    if (existing) {
+      if (amt > 0) {
+        await supabase.from('transactions').update({ amount: amt, edited_at: new Date().toISOString() }).eq('id', existing.id);
+      } else {
+        await supabase.from('transactions').update({ is_void: true, void_reason: 'Opening balance removed' }).eq('id', existing.id);
+      }
+    } else if (amt > 0) {
+      await supabase.from('transactions').insert({
+        transaction_id: txnId,
+        date: todayStr(),
+        type: 'opening_balance',
+        primary_mode: mode,
+        amount: amt,
+        description: `Opening balance - ${mode}`,
+        created_by: user?.username || null,
+      });
+    }
+    setSaved(`${mode} balance saved`);
+    setTimeout(() => setSaved(''), 2000);
+    triggerRefresh();
+  }
+
+  async function saveCustomerOpeningBalance() {
+    if (!customerId || !customerAmount) return;
+    const amt = parseFloat(customerAmount);
+    const customer = customers.find((c) => c.id === customerId);
+    if (!customer) return;
+
+    const txnId = `OPN-CR-${customerId}`;
+    const { data: existing } = await supabase.from('transactions').select('*').eq('transaction_id', txnId).maybeSingle();
+    const oldAmount = existing?.amount || 0;
+
+    await adjustCustomerCredit(customerId, amt - oldAmount);
+
+    if (existing) {
+      await supabase.from('transactions').update({ amount: amt, edited_at: new Date().toISOString() }).eq('id', existing.id);
+    } else {
+      await supabase.from('transactions').insert({
+        transaction_id: txnId,
+        date: todayStr(),
+        type: 'opening_balance',
+        primary_mode: null,
+        amount: amt,
+        customer_id: customerId,
+        description: `Opening balance owed - ${customer.name}`,
+        created_by: user?.username || null,
+      });
+    }
+    setCustomerAmount('');
+    setSaved(`${customer.name}'s opening balance saved`);
+    setTimeout(() => setSaved(''), 2000);
+    triggerRefresh();
+  }
+
+  async function saveSupplierOpeningBalance() {
+    if (!supplierId || !supplierAmount) return;
+    const amt = parseFloat(supplierAmount);
+    const supplier = suppliers.find((s) => s.id === supplierId);
+    if (!supplier) return;
+
+    const txnId = `OPN-BAL-${supplierId}`;
+    const { data: existing } = await supabase.from('transactions').select('*').eq('transaction_id', txnId).maybeSingle();
+    const oldAmount = existing?.amount || 0;
+
+    await adjustSupplierBalance(supplierId, amt - oldAmount);
+
+    if (existing) {
+      await supabase.from('transactions').update({ amount: amt, edited_at: new Date().toISOString() }).eq('id', existing.id);
+    } else {
+      await supabase.from('transactions').insert({
+        transaction_id: txnId,
+        date: todayStr(),
+        type: 'supplier_invoice',
+        primary_mode: null,
+        amount: amt,
+        supplier_id: supplierId,
+        description: `Opening balance - ${supplier.name}`,
+        created_by: user?.username || null,
+      });
+    }
+    setSupplierAmount('');
+    setSaved(`${supplier.name}'s opening balance saved`);
+    setTimeout(() => setSaved(''), 2000);
+    triggerRefresh();
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="font-semibold text-slate-800">Opening Balances</h3>
+        <p className="text-sm text-slate-500 mt-1">
+          Do this once before you start using the app for real, to carry forward your starting numbers. Everything here can also be edited later from its own page.
+        </p>
+      </div>
+      {saved && <p className="text-sm text-emerald-600">{saved}</p>}
+
+      {/* Cash */}
+      <div className="border border-slate-200 rounded-lg p-4">
+        <h4 className="text-sm font-semibold text-slate-700 mb-3">Cash in Hand</h4>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {(['cash', 'mpesa', 'paybill'] as const).map((mode) => (
+            <div key={mode} className="flex gap-2">
+              <input
+                type="number"
+                value={cashAmounts[mode]}
+                onChange={(e) => setCashAmounts({ ...cashAmounts, [mode]: e.target.value })}
+                placeholder={mode.charAt(0).toUpperCase() + mode.slice(1)}
+                className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              />
+              <button onClick={() => saveCashBalance(mode)} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-medium">Save</button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Customers */}
+      <div className="border border-slate-200 rounded-lg p-4">
+        <h4 className="text-sm font-semibold text-slate-700 mb-3">Customer Opening Balances Owed</h4>
+        <div className="flex flex-wrap gap-2">
+          <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} className="flex-1 min-w-[160px] border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+            <option value="">Select customer</option>
+            {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <input type="number" value={customerAmount} onChange={(e) => setCustomerAmount(e.target.value)} placeholder="Amount owed" className="w-40 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
+          <button onClick={saveCustomerOpeningBalance} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-medium">Save</button>
+        </div>
+        <p className="text-xs text-slate-500 mt-2">Can also be set per-customer from the Customers page.</p>
+      </div>
+
+      {/* Suppliers */}
+      <div className="border border-slate-200 rounded-lg p-4">
+        <h4 className="text-sm font-semibold text-slate-700 mb-3">Supplier Opening Balances</h4>
+        <div className="flex flex-wrap gap-2">
+          <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className="flex-1 min-w-[160px] border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none">
+            <option value="">Select supplier</option>
+            {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <input type="number" value={supplierAmount} onChange={(e) => setSupplierAmount(e.target.value)} placeholder="Amount owed" className="w-40 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
+          <button onClick={saveSupplierOpeningBalance} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-medium">Save</button>
+        </div>
+        <p className="text-xs text-slate-500 mt-2">Can also be set per-supplier from the Suppliers page.</p>
+      </div>
+
+      {/* Shortcuts */}
+      <div className="border border-slate-200 rounded-lg p-4">
+        <h4 className="text-sm font-semibold text-slate-700 mb-3">Capital, Loans &amp; Past Profit</h4>
+        <button onClick={() => navigate('/capital')} className="flex items-center gap-2 text-sm text-emerald-600 hover:text-emerald-700 font-medium">
+          Go to Capital &amp; History <ArrowRight size={14} />
+        </button>
+        <p className="text-xs text-slate-500 mt-2">Add Capital Entries, past Loans, and Historical Profit records there.</p>
+      </div>
+    </div>
+  );
+}
+
 function UserManagement() {
+  const { user, changeCredentials } = useAuth();
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newUsername, setNewUsername] = useState(user?.username || '');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function handleSave() {
+    setError('');
+    setSuccess('');
+    if (!currentPassword) { setError('Enter your current password to confirm the change'); return; }
+    if (newPassword && newPassword !== confirmPassword) { setError('New passwords do not match'); return; }
+
+    setSaving(true);
+    const result = await changeCredentials(currentPassword, newUsername, newPassword);
+    setSaving(false);
+
+    if (!result.ok) {
+      setError(result.error || 'Could not save changes');
+      return;
+    }
+    setSuccess('Saved - use your new username/password next time you log in.');
+    setCurrentPassword('');
+    setNewPassword('');
+    setConfirmPassword('');
+  }
+
   return (
     <div className="space-y-4">
       <h3 className="font-semibold text-slate-800">User Management</h3>
-      <div className="bg-slate-50 rounded-lg p-4">
-        <p className="text-sm text-slate-600">Current users:</p>
-        <div className="mt-2 space-y-2">
-          <div className="flex items-center justify-between bg-white rounded-lg p-3 border border-slate-200">
-            <div>
-              <p className="font-medium text-slate-800">taher</p>
-              <p className="text-xs text-slate-500">Admin</p>
-            </div>
-            <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Active</span>
+      <div className="bg-slate-50 rounded-lg p-4 space-y-3 max-w-md">
+        <p className="text-sm text-slate-600">
+          Signed in as <span className="font-medium text-slate-800">{user?.username}</span>. Change your own username and/or password below.
+        </p>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Current Password</label>
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+            placeholder="Required to confirm any change"
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">New Username</label>
+          <input
+            type="text"
+            value={newUsername}
+            onChange={(e) => setNewUsername(e.target.value)}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">New Password</label>
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder="Leave blank to keep current"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+            />
           </div>
-          <div className="flex items-center justify-between bg-white rounded-lg p-3 border border-slate-200">
-            <div>
-              <p className="font-medium text-slate-800">abdulqadir</p>
-              <p className="text-xs text-slate-500">Admin</p>
-            </div>
-            <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">Active</span>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Confirm New Password</label>
+            <input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+            />
           </div>
         </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        {success && <p className="text-sm text-emerald-600">{success}</p>}
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Save Changes'}
+        </button>
       </div>
-      <p className="text-xs text-slate-500">Only admins can access this page. Password is shared: &quot;gohar&quot;</p>
+      <p className="text-xs text-slate-500">Only your own account can be changed here - the other partner changes theirs the same way, from their own login.</p>
     </div>
   );
 }
@@ -218,11 +482,76 @@ function NotificationsSettings() {
   );
 }
 
-function DataExport() {
-  const [exporting, setExporting] = useState(false);
+async function fetchReportData() {
+  const [{ data: txns }, { data: customers }, { data: suppliers }] = await Promise.all([
+    supabase.from('transactions').select('*').eq('is_void', false).order('date', { ascending: false }),
+    supabase.from('customers').select('*'),
+    supabase.from('suppliers').select('*'),
+  ]);
 
-  async function exportCSV() {
-    setExporting(true);
+  const entityName = (t: any) => {
+    if (t.customer_id) return customers?.find((c) => c.id === t.customer_id)?.name || 'Customer';
+    if (t.supplier_id) return suppliers?.find((s) => s.id === t.supplier_id)?.name || 'Supplier';
+    if (t.partner_id) return t.partner_id.charAt(0).toUpperCase() + t.partner_id.slice(1);
+    return '-';
+  };
+
+  let salesTotal = 0, costTotal = 0, commissionTotal = 0, shopExpenseTotal = 0, homeExpenseTotal = 0;
+  let partnerDrawTotal = 0, loanPaymentTotal = 0, supplierPaymentTotal = 0, customerCollectionTotal = 0;
+
+  (txns || []).forEach((t) => {
+    if (t.type === 'sale') {
+      salesTotal += t.selling_price || t.amount;
+      costTotal += t.cost_price || 0;
+      commissionTotal += t.commission || 0;
+    } else if (t.type === 'customer_payment') {
+      customerCollectionTotal += t.amount;
+    } else if (t.type === 'expense') {
+      const isSupplierPayment = t.category === 'supplier_payment' || t.category === 'stock';
+      if (t.category === 'home_expense') homeExpenseTotal += t.amount;
+      else if (!isSupplierPayment) shopExpenseTotal += t.amount;
+    } else if (t.type === 'supplier_payment') {
+      supplierPaymentTotal += t.amount;
+    } else if (t.type === 'partner_draw') {
+      partnerDrawTotal += t.amount;
+    } else if (t.type === 'loan_payment') {
+      loanPaymentTotal += t.amount;
+    }
+  });
+
+  const grossProfit = salesTotal - costTotal - commissionTotal;
+  const netProfit = grossProfit - shopExpenseTotal - homeExpenseTotal - partnerDrawTotal - loanPaymentTotal;
+
+  const summaryRows: [string, string][] = [
+    ['Sales', formatKES(salesTotal)],
+    ['Gross Profit', formatKES(grossProfit)],
+    ['Net Profit', formatKES(netProfit)],
+    ['Shop Expenses', formatKES(shopExpenseTotal)],
+    ['Home Expenses', formatKES(homeExpenseTotal)],
+    ['Partner Withdrawals', formatKES(partnerDrawTotal)],
+    ['Loan Repayments', formatKES(loanPaymentTotal)],
+    ['Supplier Payments', formatKES(supplierPaymentTotal)],
+    ['Customer Collections', formatKES(customerCollectionTotal)],
+  ];
+
+  const txnRows = (txns || []).map((t) => [
+    t.date,
+    t.transaction_id,
+    t.type.replace(/_/g, ' '),
+    t.description || '',
+    entityName(t),
+    t.primary_mode || '-',
+    t.amount,
+  ]);
+
+  return { summaryRows, txnRows };
+}
+
+function DataExport() {
+  const [exporting, setExporting] = useState<string | null>(null);
+
+  async function exportJSON() {
+    setExporting('json');
     try {
       const { data: txns } = await supabase.from('transactions').select('*').eq('is_void', false);
       const { data: customers } = await supabase.from('customers').select('*').eq('is_active', true);
@@ -242,34 +571,101 @@ function DataExport() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `gohar-records-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `gohar-records-backup-${todayStr()}.json`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Export failed:', err);
     }
-    setExporting(false);
+    setExporting(null);
+  }
+
+  async function exportExcel() {
+    setExporting('excel');
+    try {
+      const { summaryRows, txnRows } = await fetchReportData();
+
+      const wb = XLSX.utils.book_new();
+      const summarySheet = XLSX.utils.aoa_to_sheet([['Summary', ''], ...summaryRows]);
+      XLSX.utils.book_append_sheet(wb, summarySheet, 'Summary');
+
+      const txnSheet = XLSX.utils.aoa_to_sheet([
+        ['Date', 'ID', 'Type', 'Description', 'Entity', 'Mode', 'Amount'],
+        ...txnRows,
+      ]);
+      XLSX.utils.book_append_sheet(wb, txnSheet, 'Transactions');
+
+      XLSX.writeFile(wb, `gohar-records-report-${todayStr()}.xlsx`);
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
+    setExporting(null);
+  }
+
+  async function exportPDF() {
+    setExporting('pdf');
+    try {
+      const { summaryRows, txnRows } = await fetchReportData();
+
+      const doc = new jsPDF();
+      doc.setFontSize(16);
+      doc.text('Gohar Records - Business Report', 14, 16);
+      doc.setFontSize(10);
+      doc.text(`Generated ${todayStr()}`, 14, 22);
+
+      autoTable(doc, {
+        startY: 28,
+        head: [['Summary', 'Amount (KES)']],
+        body: summaryRows,
+        theme: 'striped',
+        headStyles: { fillColor: [5, 150, 105] },
+      });
+
+      const afterSummaryY = (doc as any).lastAutoTable.finalY + 8;
+      autoTable(doc, {
+        startY: afterSummaryY,
+        head: [['Date', 'ID', 'Type', 'Description', 'Entity', 'Mode', 'Amount']],
+        body: txnRows,
+        theme: 'striped',
+        headStyles: { fillColor: [5, 150, 105] },
+        styles: { fontSize: 8 },
+      });
+
+      doc.save(`gohar-records-report-${todayStr()}.pdf`);
+    } catch (err) {
+      console.error('Export failed:', err);
+    }
+    setExporting(null);
   }
 
   return (
     <div className="space-y-4">
       <h3 className="font-semibold text-slate-800">Data & Backup</h3>
+      <p className="text-sm text-slate-500">Excel and PDF give you a formatted business report (sales, profit, expenses, and the full transaction list). JSON gives you a raw copy of your data.</p>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <button
-          onClick={exportCSV}
-          disabled={exporting}
+          onClick={exportExcel}
+          disabled={!!exporting}
+          className="bg-white border border-slate-300 hover:bg-slate-50 rounded-lg p-4 flex flex-col items-center gap-2 transition-colors disabled:opacity-50"
+        >
+          <Download size={24} className="text-blue-600" />
+          <span className="text-sm font-medium text-slate-700">{exporting === 'excel' ? 'Exporting...' : 'Export as Excel'}</span>
+        </button>
+        <button
+          onClick={exportPDF}
+          disabled={!!exporting}
+          className="bg-white border border-slate-300 hover:bg-slate-50 rounded-lg p-4 flex flex-col items-center gap-2 transition-colors disabled:opacity-50"
+        >
+          <Download size={24} className="text-red-600" />
+          <span className="text-sm font-medium text-slate-700">{exporting === 'pdf' ? 'Exporting...' : 'Export as PDF'}</span>
+        </button>
+        <button
+          onClick={exportJSON}
+          disabled={!!exporting}
           className="bg-white border border-slate-300 hover:bg-slate-50 rounded-lg p-4 flex flex-col items-center gap-2 transition-colors disabled:opacity-50"
         >
           <Download size={24} className="text-emerald-600" />
-          <span className="text-sm font-medium text-slate-700">{exporting ? 'Exporting...' : 'Export as JSON'}</span>
-        </button>
-        <button className="bg-white border border-slate-300 hover:bg-slate-50 rounded-lg p-4 flex flex-col items-center gap-2 transition-colors opacity-50 cursor-not-allowed">
-          <Download size={24} className="text-blue-600" />
-          <span className="text-sm font-medium text-slate-700">Excel (Coming Soon)</span>
-        </button>
-        <button className="bg-white border border-slate-300 hover:bg-slate-50 rounded-lg p-4 flex flex-col items-center gap-2 transition-colors opacity-50 cursor-not-allowed">
-          <Download size={24} className="text-red-600" />
-          <span className="text-sm font-medium text-slate-700">PDF (Coming Soon)</span>
+          <span className="text-sm font-medium text-slate-700">{exporting === 'json' ? 'Exporting...' : 'Export as JSON'}</span>
         </button>
       </div>
     </div>

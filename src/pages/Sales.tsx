@@ -170,14 +170,12 @@ export default function Sales() {
 
     const txnId = await getNextTransactionId(form.date);
 
-    // For advance mode, use the selected advanceMode as the actual payment mode
-    const actualMode = form.mode === 'advance' ? form.advanceMode : form.mode;
-
     const txnData: any = {
       transaction_id: txnId,
       date: form.date,
       type: 'sale',
-      primary_mode: actualMode,
+      primary_mode: form.mode,
+      settlement_mode: form.mode === 'advance' ? form.advanceMode : null,
       amount: sp,
       description: form.notes || null,
       notes: form.notes || null,
@@ -244,9 +242,10 @@ export default function Sales() {
         date: f.date,
         type: 'sale',
         primary_mode: f.mode,
+        settlement_mode: f.mode === 'advance' ? f.advanceMode : null,
         amount: sp,
         description: f.notes || null,
-        notes: f.notes || null,
+        notes: f.mode === 'advance' ? `Advance payment via ${f.advanceMode}${f.notes ? ' | ' + f.notes : ''}` : (f.notes || null),
         selling_price: sp,
         cost_price: cp || null,
         commission: comm || null,
@@ -331,9 +330,10 @@ export default function Sales() {
     await supabase.from('transactions').update({
       date: form.date,
       primary_mode: form.mode,
+      settlement_mode: form.mode === 'advance' ? form.advanceMode : null,
       amount: sp,
-      description: form.description || null,
-      notes: form.notes || null,
+      description: form.notes || null,
+      notes: form.mode === 'advance' ? `Advance payment via ${form.advanceMode}${form.notes ? ' | ' + form.notes : ''}` : (form.notes || null),
       selling_price: sp,
       cost_price: cp || null,
       commission: comm || null,
@@ -391,7 +391,7 @@ export default function Sales() {
       splitCash: String(existingSplits.find((s) => s.mode === 'cash')?.amount || ''),
       splitPaybill: String(existingSplits.find((s) => s.mode === 'paybill')?.amount || ''),
       isUnclassified: sale.is_unclassified,
-      advanceMode: 'cash',
+      advanceMode: sale.settlement_mode || 'cash',
     });
     setShowAdd(true);
   }
@@ -661,11 +661,16 @@ export default function Sales() {
                                     sale.primary_mode === 'advance' ? 'bg-purple-100 text-purple-700' :
                                     'bg-slate-100 text-slate-700'
                                   }`}>
-                                    {sale.primary_mode}
+                                    {sale.primary_mode}{sale.primary_mode === 'advance' && sale.settlement_mode ? ` (${sale.settlement_mode})` : ''}
                                   </span>
                                 </td>
                                 <td className="px-4 py-2 text-slate-700">
                                   {sale.description || '-'}
+                                  {sale.created_by && (
+                                    <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title="Added by">
+                                      {sale.created_by}
+                                    </span>
+                                  )}
                                   {sale.edited_at && (
                                     <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Edited ${formatDate(sale.edited_at)}`}>
                                       Edited

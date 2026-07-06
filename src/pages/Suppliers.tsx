@@ -440,6 +440,9 @@ export default function Suppliers() {
                   {(s.balance || 0) > 0 && (
                     <span className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">{formatKES(s.balance)}</span>
                   )}
+                  {(s.balance || 0) < 0 && (
+                    <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full" title="Supplier owes you">Cr: {formatKES(Math.abs(s.balance))}</span>
+                  )}
                   {s.is_dual_party && (
                     <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">Dual</span>
                   )}
@@ -473,9 +476,13 @@ export default function Suppliers() {
               </div>
 
               {/* Balance */}
-              <div className="bg-red-50 rounded-lg p-4 border border-red-100 mb-4">
-                <p className="text-sm text-red-600">Balance Owed</p>
-                <p className="text-2xl font-bold text-red-700">KES {formatKES(selectedSupplier.balance || 0)}</p>
+              <div className={`rounded-lg p-4 border mb-4 ${(selectedSupplier.balance || 0) < 0 ? 'bg-emerald-50 border-emerald-100' : 'bg-red-50 border-red-100'}`}>
+                <p className={`text-sm ${(selectedSupplier.balance || 0) < 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {(selectedSupplier.balance || 0) < 0 ? 'Supplier Owes You (Credit)' : 'Balance Owed'}
+                </p>
+                <p className={`text-2xl font-bold ${(selectedSupplier.balance || 0) < 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                  KES {formatKES(Math.abs(selectedSupplier.balance || 0))}
+                </p>
               </div>
 
               {/* Transaction History */}
@@ -510,6 +517,11 @@ export default function Suppliers() {
                           </td>
                           <td className="px-3 py-2 text-slate-700">
                             {t.description || '-'}
+                            {t.created_by && (
+                              <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title="Added by">
+                                {t.created_by}
+                              </span>
+                            )}
                             {t.edited_at && (
                               <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Edited ${formatDate(t.edited_at)}`}>
                                 Edited

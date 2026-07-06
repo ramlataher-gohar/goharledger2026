@@ -243,13 +243,18 @@ export default function Reports() {
 
     transactions.forEach((t) => {
       if (t.type === 'sale') {
-        totalIn += t.amount;
+        // Advance-mode sales don't bring in new cash - that was already
+        // counted as "in" when the advance was deposited (a customer_payment),
+        // so counting the settlement here too would double it.
+        if (t.primary_mode !== 'advance') totalIn += t.amount;
         salesTotal += t.selling_price || t.amount;
         costTotal += t.cost_price || 0;
         commissionTotal += t.commission || 0;
       } else if (t.type === 'customer_payment') {
         totalIn += t.amount;
         customerCollectionTotal += t.amount;
+      } else if (t.type === 'opening_balance') {
+        totalIn += t.amount;
       } else if (t.type === 'expense') {
         totalOut += t.amount;
         expenseTotal += t.amount;
@@ -319,7 +324,11 @@ export default function Reports() {
   }
 
   function getDebitCredit(txn: Transaction) {
-    if (txn.type === 'sale' || txn.type === 'customer_payment' || txn.type === 'partner_loan' || txn.type === 'capital_entry') {
+    if (txn.type === 'sale' && txn.primary_mode === 'advance') {
+      // No new cash moved - already counted when the advance was deposited.
+      return { debit: 0, credit: 0 };
+    }
+    if (txn.type === 'sale' || txn.type === 'customer_payment' || txn.type === 'partner_loan' || txn.type === 'capital_entry' || txn.type === 'opening_balance') {
       return { debit: 0, credit: txn.amount };
     }
     if (txn.type === 'expense' || txn.type === 'supplier_payment' || txn.type === 'partner_draw' || txn.type === 'loan_payment' || txn.type === 'supplier_invoice') {

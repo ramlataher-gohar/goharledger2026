@@ -44,6 +44,10 @@ export default function CashBank() {
   const [reconcileMode, setReconcileMode] = useState<string>('');
   const [reconcileAmount, setReconcileAmount] = useState('');
   const [showLedger, setShowLedger] = useState(false);
+  const [showOpeningBalance, setShowOpeningBalance] = useState(false);
+  const [openingMode, setOpeningMode] = useState('cash');
+  const [openingAmount, setOpeningAmount] = useState('');
+  const [openingDate, setOpeningDate] = useState(todayStr());
 
   useEffect(() => {
     fetchData();
@@ -72,20 +76,23 @@ export default function CashBank() {
     transactions.forEach((t) => {
       // Sales add to balance
       if (t.type === 'sale') {
-        // Check if this is an advance payment (notes contain "Advance payment via")
-        const isAdvance = t.notes?.includes('Advance payment via');
-
         if (t.primary_mode === 'mpesa') {
           mpesa += t.amount;
-          if (isAdvance) mpesaAdvance += t.amount;
         }
         else if (t.primary_mode === 'cash') {
           cash += t.amount;
-          if (isAdvance) cashAdvance += t.amount;
         }
         else if (t.primary_mode === 'paybill') {
           paybill += t.amount;
-          if (isAdvance) paybillAdvance += t.amount;
+        }
+        // 'advance' mode sales don't add anything here - that cash was already
+        // counted when the advance was deposited (a customer_payment below), so
+        // counting it again here would double it. It reduces the "held for
+        // customers" sub-line instead, since it's no longer an outstanding advance.
+        else if (t.primary_mode === 'advance') {
+          if (t.settlement_mode === 'mpesa') mpesaAdvance -= t.amount;
+          else if (t.settlement_mode === 'cash') cashAdvance -= t.amount;
+          else if (t.settlement_mode === 'paybill') paybillAdvance -= t.amount;
         }
         else if (t.primary_mode === 'split') {
           const s = splitMap.get(t.transaction_id) || [];
@@ -111,6 +118,11 @@ export default function CashBank() {
           else if (t.primary_mode === 'paybill') paybill -= t.amount;
         }
       } else if (t.type === 'customer_payment') {
+        const isAdvanceDeposit = t.description?.startsWith('Advance from') || t.transaction_id.startsWith('OPN-ADV-');
+        if (t.primary_mode === 'mpesa') { mpesa += t.amount; if (isAdvanceDeposit) mpesaAdvance += t.amount; }
+        else if (t.primary_mode === 'cash') { cash += t.amount; if (isAdvanceDeposit) cashAdvance += t.amount; }
+        else if (t.primary_mode === 'paybill') { paybill += t.amount; if (isAdvanceDeposit) paybillAdvance += t.amount; }
+      } else if (t.type === 'opening_balance') {
         if (t.primary_mode === 'mpesa') mpesa += t.amount;
         else if (t.primary_mode === 'cash') cash += t.amount;
         else if (t.primary_mode === 'paybill') paybill += t.amount;
@@ -179,6 +191,45 @@ export default function CashBank() {
     triggerRefresh();
   }
 
+  function openingBalanceTxnId(mode: string) {
+    return `OPN-${mode.toUpperCase()}`;
+  }
+
+  async function handleSetOpeningBalance() {
+    const amt = parseFloat(openingAmount || '0');
+    if (amt < 0) return;
+
+    const txnId = openingBalanceTxnId(openingMode);
+    const existing = transactions.find((t) => t.transaction_id === txnId);
+
+    if (existing) {
+      if (amt > 0) {
+        await supabase.from('transactions').update({
+          date: openingDate,
+          amount: amt,
+          edited_at: new Date().toISOString(),
+        }).eq('id', existing.id);
+      } else {
+        await supabase.from('transactions').update({ is_void: true, void_reason: 'Opening balance removed' }).eq('id', existing.id);
+      }
+    } else if (amt > 0) {
+      await supabase.from('transactions').insert({
+        transaction_id: txnId,
+        date: openingDate,
+        type: 'opening_balance',
+        primary_mode: openingMode,
+        amount: amt,
+        description: `Opening balance - ${openingMode}`,
+        created_by: user?.username || null,
+      });
+    }
+
+    setOpeningAmount('');
+    setShowOpeningBalance(false);
+    fetchData();
+    triggerRefresh();
+  }
+
   function getLedgerEntries(mode: string) {
     const entries: { date: string; description: string; debit: number; credit: number; balance: number }[] = [];
     let balance = 0;
@@ -221,6 +272,11 @@ export default function CashBank() {
           const s = splitMap.get(t.transaction_id) || [];
           const sp = s.find((x) => x.mode === mode);
           if (sp) credit += sp.amount;
+          // A split sale's commission can still be paid from a mode that
+          // wasn't part of the split itself - this was previously missed here.
+          if (t.commission && t.commission > 0 && t.commission_mode === mode) {
+            debit += t.commission;
+          }
         } else {
           // Sale was in different mode but commission might be in this mode
           if (t.commission && t.commission > 0 && t.commission_mode === mode) {
@@ -240,6 +296,8 @@ export default function CashBank() {
           }
         }
       } else if (t.type === 'customer_payment') {
+        if (mode === 'all' || t.primary_mode === mode) credit += t.amount;
+      } else if (t.type === 'opening_balance') {
         if (mode === 'all' || t.primary_mode === mode) credit += t.amount;
       } else if (t.type === 'supplier_payment') {
         if (mode === 'all' || t.primary_mode === mode) debit += t.amount;
@@ -298,12 +356,75 @@ export default function CashBank() {
           <ArrowLeftRight size={16} /> Fund Transfer
         </button>
         <button
+          onClick={() => {
+            const existing = transactions.find((t) => t.transaction_id === openingBalanceTxnId(openingMode));
+            setOpeningAmount(existing ? String(existing.amount) : '');
+            setOpeningDate(todayStr());
+            setShowOpeningBalance(true);
+          }}
+          className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
+        >
+          <Wallet size={16} /> Set Opening Balance
+        </button>
+        <button
           onClick={() => setShowLedger(true)}
           className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
         >
           <BookOpen size={16} /> View Ledger
         </button>
       </div>
+
+      {/* Opening Balance Modal */}
+      {showOpeningBalance && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-slate-800">Set Opening Balance</h3>
+            <button onClick={() => setShowOpeningBalance(false)} className="p-1 hover:bg-slate-100 rounded">
+              <X size={18} />
+            </button>
+          </div>
+          <p className="text-sm text-slate-500 mb-4">
+            Use this to enter your starting Cash/Mpesa/Paybill balance when you begin using the app - it's added on top of whatever transactions already exist, one canonical entry per mode that you can come back and edit.
+          </p>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Mode</label>
+                <select
+                  value={openingMode}
+                  onChange={(e) => {
+                    const m = e.target.value;
+                    setOpeningMode(m);
+                    const existing = transactions.find((t) => t.transaction_id === openingBalanceTxnId(m));
+                    setOpeningAmount(existing ? String(existing.amount) : '');
+                  }}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="mpesa">Mpesa</option>
+                  <option value="paybill">Paybill</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Amount</label>
+                <input type="number" value={openingAmount} onChange={(e) => setOpeningAmount(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
+                <input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={handleSetOpeningBalance} className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+                <Save size={16} /> Save
+              </button>
+              <button onClick={() => setShowOpeningBalance(false)} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Transfer Modal */}
       {showTransfer && (

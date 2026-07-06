@@ -21,7 +21,8 @@ export type TransactionType =
   | 'supplier_payment'
   | 'supplier_invoice'
   | 'capital_entry'
-  | 'loan_payment';
+  | 'loan_payment'
+  | 'opening_balance';
 
 export type PartnerId = 'taher' | 'abdulqadir';
 
@@ -31,6 +32,7 @@ export interface Transaction {
   date: string;
   type: TransactionType;
   primary_mode: PaymentMode | null;
+  settlement_mode: PaymentMode | null;
   amount: number;
   description: string | null;
   notes: string | null;
@@ -120,6 +122,7 @@ export interface CapitalEntry {
   date: string;
   description: string | null;
   status: string;
+  created_by: string | null;
 }
 
 export interface HistoricalProfit {
@@ -132,6 +135,7 @@ export interface HistoricalProfit {
   abdulqadir_taken: number;
   retained: number | null;
   notes: string | null;
+  created_by: string | null;
 }
 
 export interface BusinessProfile {

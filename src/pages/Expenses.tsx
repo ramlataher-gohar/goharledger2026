@@ -169,7 +169,8 @@ export default function Expenses() {
     }
 
     // Handle loan payment separately
-    if (activeTab === 'loans' && form.loanId) {
+    if (activeTab === 'loans') {
+      if (!form.loanId) return;
       const loan = loans.find((l) => l.id === form.loanId);
       if (!loan) return;
 
@@ -406,6 +407,11 @@ export default function Expenses() {
 
   const sortedDates = Array.from(grouped.keys()).sort((a, b) => b.localeCompare(a));
   const shopCategories = expenseCategories.filter((c) => c.name !== 'home_expense');
+  // 'stock' and 'supplier_payment' are excluded from the Shop tab's own
+  // category picker - selecting them here has no supplier to attach the
+  // payment to, so the amount would never reduce a supplier balance or show
+  // up anywhere. Use the dedicated "Supplier Payments" tab for those instead.
+  const shopSelectableCategories = shopCategories.filter((c) => c.name !== 'stock' && c.name !== 'supplier_payment');
 
   return (
     <div className="space-y-4">
@@ -493,7 +499,7 @@ export default function Expenses() {
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
           >
             <option value="">All Categories</option>
-            {shopCategories.map((c) => <option key={c.id} value={c.name}>{c.name.replace('_', ' ')}</option>)}
+            {shopSelectableCategories.map((c) => <option key={c.id} value={c.name}>{c.name.replace('_', ' ')}</option>)}
           </select>
         )}
       </div>
@@ -545,7 +551,7 @@ export default function Expenses() {
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               >
                 <option value="">Category</option>
-                {shopCategories.map((c) => <option key={c.id} value={c.name}>{c.name.replace('_', ' ')}</option>)}
+                {shopSelectableCategories.map((c) => <option key={c.id} value={c.name}>{c.name.replace('_', ' ')}</option>)}
               </select>
             )}
 
@@ -730,6 +736,11 @@ export default function Expenses() {
                               </td>
                               <td className="px-4 py-2 text-slate-700">
                                 {exp.description || '-'}
+                                {exp.created_by && (
+                                  <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title="Added by">
+                                    {exp.created_by}
+                                  </span>
+                                )}
                                 {exp.edited_at && (
                                   <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500" title={`Edited ${formatDate(exp.edited_at)}`}>
                                     Edited

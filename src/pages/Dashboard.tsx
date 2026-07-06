@@ -38,6 +38,7 @@ interface DailySalesBreakdown {
   paybillAmount: number;
   creditAmount: number;
   advanceAmount: number;
+  supplierAmount: number;
   profit: number;
   commission: number;
   totalExpenses: number;
@@ -154,7 +155,7 @@ export default function Dashboard() {
       splitMap.get(s.transaction_id)!.push(s);
     });
 
-    let totalSales = 0, cashAmount = 0, mpesaAmount = 0, paybillAmount = 0, creditAmount = 0, advanceAmount = 0, profit = 0, commission = 0;
+    let totalSales = 0, cashAmount = 0, mpesaAmount = 0, paybillAmount = 0, creditAmount = 0, advanceAmount = 0, supplierAmount = 0, profit = 0, commission = 0;
     let totalExpenses = 0, cashExpenses = 0, mpesaExpenses = 0, paybillExpenses = 0;
 
     txns?.forEach((t) => {
@@ -162,15 +163,13 @@ export default function Dashboard() {
       profit += (t.selling_price || 0) - (t.cost_price || 0) - (t.commission || 0);
       commission += t.commission || 0;
 
-      // Check if this is an advance payment
-      const isAdvance = t.notes?.includes('Advance payment via');
-
-      if (isAdvance) {
+      if (t.primary_mode === 'advance') {
         advanceAmount += t.selling_price || 0;
       } else if (t.primary_mode === 'cash') cashAmount += t.selling_price || 0;
       else if (t.primary_mode === 'mpesa') mpesaAmount += t.selling_price || 0;
       else if (t.primary_mode === 'paybill') paybillAmount += t.selling_price || 0;
       else if (t.primary_mode === 'credit') creditAmount += t.selling_price || 0;
+      else if (t.primary_mode === 'supplier') supplierAmount += t.selling_price || 0;
       else if (t.primary_mode === 'split') {
         const s = splitMap.get(t.transaction_id) || [];
         s.forEach((sp) => {
@@ -178,6 +177,15 @@ export default function Dashboard() {
           else if (sp.mode === 'mpesa') mpesaAmount += sp.amount;
           else if (sp.mode === 'paybill') paybillAmount += sp.amount;
         });
+      }
+
+      // Commission is a separate cash outflow from whichever mode it's paid from,
+      // independent of how the sale itself was settled - deduct it from that
+      // mode's bucket so this breakdown matches the main Cash-in-Hand balance.
+      if (t.commission && t.commission > 0 && t.commission_mode) {
+        if (t.commission_mode === 'cash') cashAmount -= t.commission;
+        else if (t.commission_mode === 'mpesa') mpesaAmount -= t.commission;
+        else if (t.commission_mode === 'paybill') paybillAmount -= t.commission;
       }
     });
 
@@ -198,7 +206,7 @@ export default function Dashboard() {
       }
     });
 
-    setDailySalesBreakdown({ totalSales, cashAmount, mpesaAmount, paybillAmount, creditAmount, advanceAmount, profit, commission, totalExpenses, cashExpenses, mpesaExpenses, paybillExpenses });
+    setDailySalesBreakdown({ totalSales, cashAmount, mpesaAmount, paybillAmount, creditAmount, advanceAmount, supplierAmount, profit, commission, totalExpenses, cashExpenses, mpesaExpenses, paybillExpenses });
   }
 
   async function calculateMonthlyCapital() {
@@ -260,21 +268,18 @@ export default function Dashboard() {
 
         // Cash balances
         if (t.type === 'sale') {
-          // Check if this is an advance payment
-          const isAdvance = t.notes?.includes('Advance payment via');
-
           if (t.primary_mode === 'mpesa') {
             mpesa += t.amount;
-            if (isAdvance) mpesaAdvance += t.amount;
           }
           else if (t.primary_mode === 'cash') {
             cash += t.amount;
-            if (isAdvance) cashAdvance += t.amount;
           }
           else if (t.primary_mode === 'paybill') {
             bank += t.amount;
-            if (isAdvance) bankAdvance += t.amount;
           }
+          // 'advance' mode sales don't add anything here - that cash was
+          // already counted when the advance was deposited (a customer_payment
+          // below), so counting it again here would double it.
           else if (t.primary_mode === 'split') {
             const s = splitMap.get(t.transaction_id) || [];
             s.forEach((sp) => {
@@ -309,9 +314,13 @@ export default function Dashboard() {
           else if (desc.includes('cash to paybill')) { cash -= t.amount; bank += t.amount; }
           else if (desc.includes('paybill to cash')) { bank -= t.amount; cash += t.amount; }
         } else if (t.type === 'customer_payment') {
-          if (t.primary_mode === 'mpesa') mpesa += t.amount;
-          else if (t.primary_mode === 'cash') cash += t.amount;
-          else if (t.primary_mode === 'paybill') bank += t.amount;
+          // A deposit into a customer's advance balance is still cash held on
+          // the shop's behalf that's technically owed back (as prepaid credit),
+          // so it's tracked separately in the "advance" sub-line as well.
+          const isAdvanceDeposit = t.description?.startsWith('Advance from') || t.transaction_id.startsWith('OPN-ADV-');
+          if (t.primary_mode === 'mpesa') { mpesa += t.amount; if (isAdvanceDeposit) mpesaAdvance += t.amount; }
+          else if (t.primary_mode === 'cash') { cash += t.amount; if (isAdvanceDeposit) cashAdvance += t.amount; }
+          else if (t.primary_mode === 'paybill') { bank += t.amount; if (isAdvanceDeposit) bankAdvance += t.amount; }
         } else if (t.type === 'supplier_payment' || t.type === 'supplier_invoice') {
           // Supplier payments deduct from mode balance
           if (t.primary_mode === 'mpesa') mpesa -= t.amount;
@@ -325,6 +334,20 @@ export default function Dashboard() {
           if (t.primary_mode === 'mpesa') mpesa -= t.amount;
           else if (t.primary_mode === 'cash') cash -= t.amount;
           else if (t.primary_mode === 'paybill') bank -= t.amount;
+        } else if (t.type === 'opening_balance') {
+          if (t.primary_mode === 'mpesa') mpesa += t.amount;
+          else if (t.primary_mode === 'cash') cash += t.amount;
+          else if (t.primary_mode === 'paybill') bank += t.amount;
+        }
+
+        // Once an advance is spent (a sale in 'advance' mode), it's no longer
+        // sitting in the balance as an unclaimed liability - reduce the
+        // advance-held sub-line by that amount so it reflects what's still
+        // "held for customers" right now, not everything ever deposited.
+        if (t.type === 'sale' && t.primary_mode === 'advance') {
+          if (t.settlement_mode === 'mpesa') mpesaAdvance -= t.amount;
+          else if (t.settlement_mode === 'cash') cashAdvance -= t.amount;
+          else if (t.settlement_mode === 'paybill') bankAdvance -= t.amount;
         }
 
         if (t.type === 'sale') {
@@ -415,6 +438,7 @@ export default function Dashboard() {
       });
 
       const totalSuppliersOwed = (suppData || []).reduce((sum, s) => sum + (s.balance || 0), 0);
+      const totalCustomersPending = (custData || []).reduce((sum, c) => sum + (c.credit_balance || 0), 0);
       const totalNetProfit = totalGrossProfit - totalShopExpenses - totalHomeExpenses - totalPartnerDraws - totalLoanPayments;
       const monthNetProfit = monthGrossProfit - monthShopExpenses - monthHomeExpenses - monthPartnerDraws - monthLoanPayments;
       const totalCapitalVal = (capitalData || []).reduce((sum, c) => sum + (c.amount || 0), 0);
@@ -439,6 +463,7 @@ export default function Dashboard() {
         monthSupplierPayments,
         monthCustomerCollections,
         totalSuppliersOwed,
+        totalCustomersPending,
         taherBalance: taherBal,
         abdulqadirBalance: abdulBal,
         totalSalesSinceStart: totalSales,
@@ -558,16 +583,22 @@ export default function Dashboard() {
 
       {/* Supplier Total Owed - MOVED UP */}
       <button onClick={() => navigate('/suppliers')} className="w-full text-left">
-        <div className="bg-red-50 rounded-xl border border-red-200 shadow-sm p-5 hover:bg-red-100 transition-colors">
+        <div className={`rounded-xl border shadow-sm p-5 transition-colors ${
+          (stats?.totalSuppliersOwed || 0) < 0 ? 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100' : 'bg-red-50 border-red-200 hover:bg-red-100'
+        }`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <AlertCircle size={24} className="text-red-500" />
+              <AlertCircle size={24} className={(stats?.totalSuppliersOwed || 0) < 0 ? 'text-emerald-500' : 'text-red-500'} />
               <div>
-                <p className="text-sm text-red-600">Total Owed to Suppliers</p>
-                <p className="text-2xl font-bold text-red-700">KES {formatKES(stats?.totalSuppliersOwed || 0)}</p>
+                <p className={`text-sm ${(stats?.totalSuppliersOwed || 0) < 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {(stats?.totalSuppliersOwed || 0) < 0 ? 'Suppliers Owe You (Credit)' : 'Total Owed to Suppliers'}
+                </p>
+                <p className={`text-2xl font-bold ${(stats?.totalSuppliersOwed || 0) < 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                  KES {formatKES(Math.abs(stats?.totalSuppliersOwed || 0))}
+                </p>
               </div>
             </div>
-            <span className="text-sm text-red-600">Click to view suppliers</span>
+            <span className={`text-sm ${(stats?.totalSuppliersOwed || 0) < 0 ? 'text-emerald-600' : 'text-red-600'}`}>Click to view suppliers</span>
           </div>
         </div>
       </button>
@@ -610,7 +641,7 @@ export default function Dashboard() {
         </div>
         {dailySalesBreakdown && (
           <div className="space-y-3">
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-10 gap-4">
               <div className="bg-slate-50 rounded-lg p-3">
                 <p className="text-xs text-slate-500">Total Sales</p>
                 <p className="text-lg font-bold text-slate-800">KES {formatKES(dailySalesBreakdown.totalSales)}</p>
@@ -643,6 +674,10 @@ export default function Dashboard() {
               <div className="bg-purple-50 rounded-lg p-3">
                 <p className="text-xs text-purple-600">Advance</p>
                 <p className="text-lg font-bold text-purple-700">KES {formatKES(dailySalesBreakdown.advanceAmount)}</p>
+              </div>
+              <div className="bg-slate-100 rounded-lg p-3">
+                <p className="text-xs text-slate-600">Supplier</p>
+                <p className="text-lg font-bold text-slate-700">KES {formatKES(dailySalesBreakdown.supplierAmount)}</p>
               </div>
               <div className="bg-orange-50 rounded-lg p-3">
                 <p className="text-xs text-orange-600">Commission</p>
@@ -740,7 +775,7 @@ export default function Dashboard() {
           <button onClick={() => navigate('/expenses')} className="text-left"><StatBox label="Home Expenses" value={stats?.monthHomeExpenses || 0} icon={<Home size={16} />} color="text-orange-600" clickable /></button>
           <button onClick={() => navigate('/partners')} className="text-left"><StatBox label="Partner Withdrawals" value={stats?.monthPartnerDraws || 0} icon={<Users size={16} />} color="text-purple-600" clickable /></button>
           <button onClick={() => navigate('/suppliers')} className="text-left"><StatBox label="Supplier Payments" value={stats?.monthSupplierPayments || 0} icon={<ArrowUp size={16} />} color="text-amber-600" clickable /></button>
-          <button onClick={() => navigate('/customers')} className="text-left"><StatBox label="Customer Collections" value={stats?.monthCustomerCollections || 0} icon={<ArrowDown size={16} />} color="text-blue-600" clickable /></button>
+          <button onClick={() => navigate('/customers')} className="text-left"><StatBox label="Customers Pending" value={stats?.totalCustomersPending || 0} icon={<ArrowDown size={16} />} color="text-blue-600" clickable /></button>
         </div>
       </div>
 
