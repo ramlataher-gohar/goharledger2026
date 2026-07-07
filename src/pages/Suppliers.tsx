@@ -12,6 +12,7 @@ import {
 import { supabase } from '../utils/supabase';
 import { formatKES, formatDate, todayStr } from '../utils/format';
 import { adjustSupplierBalance } from '../utils/balances';
+import { insertTransactionWithId } from '../utils/transactionId';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -200,23 +201,9 @@ export default function Suppliers() {
 
     const amt = parseFloat(invoiceForm.amount);
 
-    const { data: lastTxn } = await supabase
-      .from('transactions')
-      .select('transaction_id')
-      .like('transaction_id', 'INV-%')
-      .order('transaction_id', { ascending: false })
-      .limit(1);
-
-    let seq = 1;
-    if (lastTxn && lastTxn.length > 0) {
-      const match = lastTxn[0].transaction_id.match(/-(\d{3})$/);
-      if (match) seq = parseInt(match[1]) + 1;
-    }
-    const txnId = `INV-${invoiceForm.date.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
-
     // Create supplier_invoice transaction (NOT expense - separate from shop expenses)
-    await supabase.from('transactions').insert({
-      transaction_id: txnId,
+    const { data: newTxn, error, transactionId: txnId } = await insertTransactionWithId('INV-' + invoiceForm.date.replace(/-/g, ''), (transactionId) => ({
+      transaction_id: transactionId,
       date: invoiceForm.date,
       type: 'supplier_invoice',
       primary_mode: null,
@@ -226,7 +213,8 @@ export default function Suppliers() {
       description: `Invoice from ${selectedSupplier.name}`,
       notes: invoiceForm.notes || null,
       created_by: user?.username || null,
-    });
+    }));
+    if (error || !newTxn) { console.error(error); alert('Failed to save invoice: ' + (error?.message || 'unknown error')); return; }
 
     // Update supplier balance (re-reads the current balance first so two invoices added
     // back-to-back always add up instead of one overwriting the other)
@@ -255,21 +243,7 @@ export default function Suppliers() {
 
     const amt = parseFloat(paymentForm.amount);
 
-    const { data: lastTxn } = await supabase
-      .from('transactions')
-      .select('transaction_id')
-      .like('transaction_id', 'SUP-%')
-      .order('transaction_id', { ascending: false })
-      .limit(1);
-
-    let seq = 1;
-    if (lastTxn && lastTxn.length > 0) {
-      const match = lastTxn[0].transaction_id.match(/-(\d{3})$/);
-      if (match) seq = parseInt(match[1]) + 1;
-    }
-    const txnId = `SUP-${paymentForm.date.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
-
-    await supabase.from('transactions').insert({
+    const { data: newTxn, error } = await insertTransactionWithId('SUP-' + paymentForm.date.replace(/-/g, ''), (txnId) => ({
       transaction_id: txnId,
       date: paymentForm.date,
       type: 'supplier_payment',
@@ -279,7 +253,8 @@ export default function Suppliers() {
       description: `Payment to ${selectedSupplier.name}`,
       notes: paymentForm.notes || null,
       created_by: user?.username || null,
-    });
+    }));
+    if (error || !newTxn) { console.error(error); alert('Failed to save payment: ' + (error?.message || 'unknown error')); return; }
 
     await adjustSupplierBalance(selectedSupplier.id, -amt);
 

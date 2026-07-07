@@ -34,8 +34,3 @@ export function getMonthLabel(dateStr: string): string {
   return d.toLocaleDateString('en-KE', { year: 'numeric', month: 'long' });
 }
 
-export function generateTransactionId(type: string, date: string, seq: number): string {
-  const prefix = type === 'sale' ? 'SAL' : type === 'expense' ? 'EXP' : 'TXN';
-  const d = date.replace(/-/g, '');
-  return `${prefix}-${d}-${String(seq).padStart(3, '0')}`;
-}

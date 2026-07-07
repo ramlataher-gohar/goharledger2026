@@ -13,6 +13,7 @@ import {
 import { supabase } from '../utils/supabase';
 import { formatKES, formatDate, getMonthLabel, todayStr } from '../utils/format';
 import { adjustLoanBalance } from '../utils/balances';
+import { insertTransactionWithId } from '../utils/transactionId';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -200,26 +201,10 @@ export default function Capital() {
     const loan = loans.find((l) => l.id === selectedLoan);
     if (!loan) return;
 
-    await adjustLoanBalance(selectedLoan, amt);
-
     // Create transaction record - Payment History below reads straight from
     // transactions, so this single insert is the only record that needs to
     // stay in sync when it's later edited or voided from the Expenses page
-    const { data: lastTxn } = await supabase
-      .from('transactions')
-      .select('transaction_id')
-      .like('transaction_id', 'LOAN-%')
-      .order('transaction_id', { ascending: false })
-      .limit(1);
-
-    let seq = 1;
-    if (lastTxn && lastTxn.length > 0) {
-      const match = lastTxn[0].transaction_id.match(/-(\d{3})$/);
-      if (match) seq = parseInt(match[1]) + 1;
-    }
-    const txnId = `LOAN-${loanPaymentForm.date.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
-
-    await supabase.from('transactions').insert({
+    const { data: newTxn, error } = await insertTransactionWithId('LOAN-' + loanPaymentForm.date.replace(/-/g, ''), (txnId) => ({
       transaction_id: txnId,
       date: loanPaymentForm.date,
       type: 'loan_payment',
@@ -229,7 +214,10 @@ export default function Capital() {
       description: `Loan payment - ${loan.loan_name}`,
       notes: loanPaymentForm.notes || null,
       created_by: user?.username || null,
-    });
+    }));
+    if (error || !newTxn) { console.error(error); alert('Failed to save loan payment: ' + (error?.message || 'unknown error')); return; }
+
+    await adjustLoanBalance(selectedLoan, amt);
 
     setLoanPaymentForm({ amount: '', date: todayStr(), mode: 'cash', notes: '' });
     setShowLoanPayment(false);

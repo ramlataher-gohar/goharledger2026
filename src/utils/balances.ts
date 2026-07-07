@@ -13,33 +13,45 @@ import { supabase } from './supabase';
 // zero used to silently discard that credit instead of letting it carry forward
 // and net out against the next invoice/sale - callers that display these values
 // should style a negative balance as a credit, not just a bare negative number.
-export async function adjustSupplierBalance(supplierId: string, delta: number): Promise<void> {
-  const { data } = await supabase.from('suppliers').select('balance').eq('id', supplierId).single();
+export async function adjustSupplierBalance(supplierId: string, delta: number): Promise<boolean> {
+  const { data, error: selectError } = await supabase.from('suppliers').select('balance').eq('id', supplierId).single();
+  if (selectError) { console.error('adjustSupplierBalance: could not read current balance', selectError); return false; }
   const next = (data?.balance || 0) + delta;
-  await supabase.from('suppliers').update({ balance: next }).eq('id', supplierId);
+  const { error } = await supabase.from('suppliers').update({ balance: next }).eq('id', supplierId);
+  if (error) { console.error('adjustSupplierBalance: update failed', error); return false; }
+  return true;
 }
 
-export async function adjustCustomerCredit(customerId: string, delta: number): Promise<void> {
-  const { data } = await supabase.from('customers').select('credit_balance').eq('id', customerId).single();
+export async function adjustCustomerCredit(customerId: string, delta: number): Promise<boolean> {
+  const { data, error: selectError } = await supabase.from('customers').select('credit_balance').eq('id', customerId).single();
+  if (selectError) { console.error('adjustCustomerCredit: could not read current balance', selectError); return false; }
   const next = (data?.credit_balance || 0) + delta;
-  await supabase.from('customers').update({ credit_balance: next }).eq('id', customerId);
+  const { error } = await supabase.from('customers').update({ credit_balance: next }).eq('id', customerId);
+  if (error) { console.error('adjustCustomerCredit: update failed', error); return false; }
+  return true;
 }
 
-export async function adjustCustomerAdvance(customerId: string, delta: number): Promise<void> {
-  const { data } = await supabase.from('customers').select('advance_balance').eq('id', customerId).single();
+export async function adjustCustomerAdvance(customerId: string, delta: number): Promise<boolean> {
+  const { data, error: selectError } = await supabase.from('customers').select('advance_balance').eq('id', customerId).single();
+  if (selectError) { console.error('adjustCustomerAdvance: could not read current balance', selectError); return false; }
   const next = (data?.advance_balance || 0) + delta;
-  await supabase.from('customers').update({ advance_balance: next }).eq('id', customerId);
+  const { error } = await supabase.from('customers').update({ advance_balance: next }).eq('id', customerId);
+  if (error) { console.error('adjustCustomerAdvance: update failed', error); return false; }
+  return true;
 }
 
 // positive paymentDelta = a payment was made (remaining down, paid up)
 // negative paymentDelta = reversing a payment (remaining up, paid down)
-export async function adjustLoanBalance(loanId: string, paymentDelta: number): Promise<void> {
-  const { data } = await supabase.from('loan_trackers').select('remaining_balance, amount_paid').eq('id', loanId).single();
+export async function adjustLoanBalance(loanId: string, paymentDelta: number): Promise<boolean> {
+  const { data, error: selectError } = await supabase.from('loan_trackers').select('remaining_balance, amount_paid').eq('id', loanId).single();
+  if (selectError) { console.error('adjustLoanBalance: could not read current balance', selectError); return false; }
   const newBal = Math.max(0, (data?.remaining_balance || 0) - paymentDelta);
   const newPaid = Math.max(0, (data?.amount_paid || 0) + paymentDelta);
-  await supabase.from('loan_trackers').update({
+  const { error } = await supabase.from('loan_trackers').update({
     remaining_balance: newBal,
     amount_paid: newPaid,
     status: newBal <= 0 ? 'settled' : 'active',
   }).eq('id', loanId);
+  if (error) { console.error('adjustLoanBalance: update failed', error); return false; }
+  return true;
 }

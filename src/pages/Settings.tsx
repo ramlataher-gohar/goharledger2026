@@ -14,9 +14,6 @@ import {
   Wallet,
   ArrowRight,
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { supabase } from '../utils/supabase';
 import { useAuth } from '../context/AuthContext';
 import { useDataRefresh } from '../context/DataContext';
@@ -589,7 +586,10 @@ function DataExport() {
   async function exportExcel() {
     setExporting('excel');
     try {
-      const { summaryRows, txnRows, businessName } = await fetchReportData();
+      const [{ summaryRows, txnRows, businessName }, XLSX] = await Promise.all([
+        fetchReportData(),
+        import('xlsx'),
+      ]);
 
       const wb = XLSX.utils.book_new();
       const summarySheet = XLSX.utils.aoa_to_sheet([[businessName, ''], ['Summary', ''], ...summaryRows]);
@@ -611,7 +611,11 @@ function DataExport() {
   async function exportPDF() {
     setExporting('pdf');
     try {
-      const { summaryRows, txnRows, businessName } = await fetchReportData();
+      const [{ summaryRows, txnRows, businessName }, { default: jsPDF }, { default: autoTable }] = await Promise.all([
+        fetchReportData(),
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ]);
 
       const doc = new jsPDF();
       doc.setFontSize(16);
