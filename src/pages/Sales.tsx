@@ -13,7 +13,8 @@ import {
   BookOpen,
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
-import { formatKES, formatDate, generateTransactionId, todayStr } from '../utils/format';
+import { formatKES, formatDate, todayStr } from '../utils/format';
+import { insertTransactionWithId } from '../utils/transactionId';
 import { adjustCustomerCredit, adjustCustomerAdvance, adjustSupplierBalance } from '../utils/balances';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
@@ -98,28 +99,15 @@ export default function Sales() {
     setLoading(false);
   }
 
-  async function getNextTransactionId(date: string): Promise<string> {
-    const prefix = 'SAL-' + date.replace(/-/g, '');
-    const { data } = await supabase
-      .from('transactions')
-      .select('transaction_id')
-      .like('transaction_id', `${prefix}%`)
-      .order('transaction_id', { ascending: false })
-      .limit(1);
-
-    let seq = 1;
-    if (data && data.length > 0) {
-      const last = data[0].transaction_id;
-      const match = last.match(/-(\d{3})$/);
-      if (match) seq = parseInt(match[1]) + 1;
-    }
-    return `${prefix}-${String(seq).padStart(3, '0')}`;
-  }
-
   async function handleQuickAddCustomer() {
-    if (!quickCustomer.name) return;
+    const name = quickCustomer.name.trim();
+    if (!name) return;
+    if (customers.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+      alert('A customer with this name already exists.');
+      return;
+    }
     const { data } = await supabase.from('customers').insert({
-      name: quickCustomer.name,
+      name,
       phone: quickCustomer.phone || null,
       credit_limit: parseFloat(quickCustomer.creditLimit || '0'),
     }).select().single();
@@ -132,10 +120,15 @@ export default function Sales() {
   }
 
   async function handleQuickAddSupplier() {
-    if (!quickSupplier.name) return;
+    const name = quickSupplier.name.trim();
+    if (!name) return;
+    if (suppliers.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+      alert('A supplier with this name already exists.');
+      return;
+    }
     const openingBalance = parseFloat(quickSupplier.balance || '0');
     const { data } = await supabase.from('suppliers').insert({
-      name: quickSupplier.name,
+      name,
       phone: quickSupplier.phone || null,
       balance: openingBalance,
     }).select().single();
@@ -163,39 +156,36 @@ export default function Sales() {
 
   async function handleSave() {
     if (!form.sellingPrice || parseFloat(form.sellingPrice) <= 0) return;
+    if ((form.mode === 'credit' || form.mode === 'advance') && !form.customerId) return;
+    if (form.mode === 'supplier' && !form.supplierId) return;
 
     const sp = parseFloat(form.sellingPrice);
     const cp = parseFloat(form.costPrice || '0');
     const comm = parseFloat(form.commission || '0');
 
-    const txnId = await getNextTransactionId(form.date);
-
-    const txnData: any = {
-      transaction_id: txnId,
-      date: form.date,
-      type: 'sale',
-      primary_mode: form.mode,
-      settlement_mode: form.mode === 'advance' ? form.advanceMode : null,
-      amount: sp,
-      description: form.notes || null,
-      notes: form.notes || null,
-      selling_price: sp,
-      cost_price: cp || null,
-      commission: comm || null,
-      commission_mode: comm > 0 ? form.commissionMode : null,
-      is_unclassified: form.isUnclassified,
-      customer_id: form.mode === 'credit' || form.mode === 'advance' ? (form.customerId || null) : null,
-      supplier_id: form.mode === 'supplier' ? (form.supplierId || null) : null,
-      created_by: user?.username || null,
-    };
-
-    // Store the original mode for advance tracking
-    if (form.mode === 'advance') {
-      txnData.notes = `Advance payment via ${form.advanceMode}${form.notes ? ' | ' + form.notes : ''}`;
-    }
-
-    const { data: newTxn, error } = await supabase.from('transactions').insert(txnData).select().single();
-    if (error) { console.error(error); return; }
+    const prefix = 'SAL-' + form.date.replace(/-/g, '');
+    const { data: newTxn, error, transactionId: txnId } = await insertTransactionWithId(prefix, (transactionId) => {
+      const row: any = {
+        transaction_id: transactionId,
+        date: form.date,
+        type: 'sale',
+        primary_mode: form.mode,
+        settlement_mode: form.mode === 'advance' ? form.advanceMode : null,
+        amount: sp,
+        description: form.notes || null,
+        notes: form.mode === 'advance' ? `Advance payment via ${form.advanceMode}${form.notes ? ' | ' + form.notes : ''}` : (form.notes || null),
+        selling_price: sp,
+        cost_price: cp || null,
+        commission: comm || null,
+        commission_mode: comm > 0 ? form.commissionMode : null,
+        is_unclassified: form.isUnclassified,
+        customer_id: form.mode === 'credit' || form.mode === 'advance' ? (form.customerId || null) : null,
+        supplier_id: form.mode === 'supplier' ? (form.supplierId || null) : null,
+        created_by: user?.username || null,
+      };
+      return row;
+    });
+    if (error || !newTxn) { console.error(error); alert('Failed to save sale: ' + (error?.message || 'unknown error')); return; }
 
     // For split mode, store the split amounts
     if (form.mode === 'split') {
@@ -227,18 +217,25 @@ export default function Sales() {
   }
 
   async function handleBulkSave() {
-    const validForms = bulkForms.filter((f) => f.sellingPrice && parseFloat(f.sellingPrice) > 0);
+    const validForms = bulkForms.filter((f) => {
+      if (!f.sellingPrice || parseFloat(f.sellingPrice) <= 0) return false;
+      if ((f.mode === 'credit' || f.mode === 'advance') && !f.customerId) return false;
+      if (f.mode === 'supplier' && !f.supplierId) return false;
+      return true;
+    });
     if (validForms.length === 0) return;
+
+    const failedRows: number[] = [];
 
     for (let i = 0; i < validForms.length; i++) {
       const f = validForms[i];
       const sp = parseFloat(f.sellingPrice);
       const cp = parseFloat(f.costPrice || '0');
       const comm = parseFloat(f.commission || '0');
-      const txnId = await getNextTransactionId(f.date);
+      const prefix = 'SAL-' + f.date.replace(/-/g, '');
 
-      const txnData: any = {
-        transaction_id: txnId,
+      const { data: newTxn, error, transactionId: txnId } = await insertTransactionWithId(prefix, (transactionId) => ({
+        transaction_id: transactionId,
         date: f.date,
         type: 'sale',
         primary_mode: f.mode,
@@ -254,10 +251,8 @@ export default function Sales() {
         customer_id: f.mode === 'credit' || f.mode === 'advance' ? (f.customerId || null) : null,
         supplier_id: f.mode === 'supplier' ? (f.supplierId || null) : null,
         created_by: user?.username || null,
-      };
-
-      const { data: newTxn } = await supabase.from('transactions').insert(txnData).select().single();
-      if (!newTxn) continue;
+      }));
+      if (error || !newTxn) { console.error(error); failedRows.push(i + 1); continue; }
 
       if (f.mode === 'split') {
         const splits = [];
@@ -282,6 +277,9 @@ export default function Sales() {
     setShowBulk(false);
     fetchData();
     triggerRefresh();
+    if (failedRows.length > 0) {
+      alert(`Row(s) ${failedRows.join(', ')} failed to save and were skipped. The rest were saved successfully.`);
+    }
   }
 
   async function handleVoid(id: string, reason: string) {
@@ -309,6 +307,9 @@ export default function Sales() {
     if (!editingId) return;
     const oldTxn = sales.find((s) => s.id === editingId);
     if (!oldTxn) return;
+    if (!form.sellingPrice || parseFloat(form.sellingPrice) <= 0) return;
+    if ((form.mode === 'credit' || form.mode === 'advance') && !form.customerId) return;
+    if (form.mode === 'supplier' && !form.supplierId) return;
 
     const sp = parseFloat(form.sellingPrice);
     const cp = parseFloat(form.costPrice || '0');
@@ -327,7 +328,7 @@ export default function Sales() {
     }
 
     // Update transaction
-    await supabase.from('transactions').update({
+    const { error: updateError } = await supabase.from('transactions').update({
       date: form.date,
       primary_mode: form.mode,
       settlement_mode: form.mode === 'advance' ? form.advanceMode : null,
@@ -343,6 +344,17 @@ export default function Sales() {
       supplier_id: form.mode === 'supplier' ? (form.supplierId || null) : null,
       edited_at: new Date().toISOString(),
     }).eq('id', editingId);
+
+    if (updateError) {
+      console.error(updateError);
+      alert('Failed to save changes: ' + updateError.message + '. The old balances were already reversed - please reopen this sale and try again.');
+      setEditingId(null);
+      setForm(emptyForm);
+      setShowAdd(false);
+      fetchData();
+      triggerRefresh();
+      return;
+    }
 
     // Replace the split breakdown to match the (possibly new) mode/amounts -
     // old rows are cleared first so switching away from split mode, or
@@ -384,7 +396,7 @@ export default function Sales() {
       costPrice: String(sale.cost_price || ''),
       commission: String(sale.commission || ''),
       commissionMode: sale.commission_mode || 'cash',
-      notes: sale.description || sale.notes || '',
+      notes: sale.primary_mode === 'advance' ? (sale.description || '') : (sale.description || sale.notes || ''),
       customerId: sale.customer_id || '',
       supplierId: sale.supplier_id || '',
       splitMpesa: String(existingSplits.find((s) => s.mode === 'mpesa')?.amount || ''),

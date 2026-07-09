@@ -13,52 +13,104 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// Supabase Auth identifies accounts by email, so each username maps to a
+// synthetic, non-deliverable address - nobody needs to receive mail at it,
+// it's just a stable identifier the two partners never see.
+function authEmail(username: string): string {
+  return `${username.trim().toLowerCase()}@goharledger.internal`;
+}
+
+async function loadAppUser(username: string): Promise<AppUser | null> {
+  const { data: row } = await supabase
+    .from('users')
+    .select('*')
+    .ilike('username', username)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (!row) return null;
+  return {
+    id: row.id,
+    username: row.username,
+    role: row.role,
+    full_name: row.full_name,
+    phone: row.phone,
+    is_active: row.is_active,
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem('gohar_user');
-    if (stored) {
-      try {
-        setUser(JSON.parse(stored));
-      } catch {
-        localStorage.removeItem('gohar_user');
+    let mounted = true;
+
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user?.email) {
+        const username = session.user.email.split('@')[0];
+        const appUser = await loadAppUser(username);
+        if (mounted) setUser(appUser);
       }
-    }
-    setIsLoading(false);
+      if (mounted) setIsLoading(false);
+    });
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) setUser(null);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (username: string, password: string): Promise<boolean> => {
+    const trimmed = username.trim();
+    const email = authEmail(trimmed);
+
+    const { data: signInData } = await supabase.auth.signInWithPassword({ email, password });
+    if (signInData.session) {
+      const appUser = await loadAppUser(trimmed);
+      if (!appUser) { await supabase.auth.signOut(); return false; }
+      setUser(appUser);
+      return true;
+    }
+
+    // No real Auth account yet for this username - check the legacy password
+    // hash used before this app had real login sessions, and if it matches,
+    // transparently create the real Auth account so this is a one-time,
+    // invisible migration for the two partners instead of a manual step.
     const { data: row } = await supabase
       .from('users')
       .select('*')
-      .ilike('username', username.trim())
+      .ilike('username', trimmed)
       .eq('is_active', true)
       .maybeSingle();
-
     if (!row) return false;
 
     const hash = await hashPassword(row.username, password);
     if (hash !== row.password_hash) return false;
 
-    const appUser: AppUser = {
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password });
+    if (signUpError || !signUpData.session) {
+      console.error('Could not create Auth account on login:', signUpError);
+      return false;
+    }
+
+    setUser({
       id: row.id,
       username: row.username,
       role: row.role,
       full_name: row.full_name,
       phone: row.phone,
       is_active: row.is_active,
-    };
-
-    setUser(appUser);
-    localStorage.setItem('gohar_user', JSON.stringify(appUser));
+    });
     return true;
   };
 
   const logout = () => {
+    supabase.auth.signOut();
     setUser(null);
-    localStorage.removeItem('gohar_user');
   };
 
   const changeCredentials = async (
@@ -71,8 +123,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: row } = await supabase.from('users').select('*').eq('id', user.id).maybeSingle();
     if (!row) return { ok: false, error: 'Account not found' };
 
-    const currentHash = await hashPassword(row.username, currentPassword);
-    if (currentHash !== row.password_hash) return { ok: false, error: 'Current password is incorrect' };
+    const { error: verifyError } = await supabase.auth.signInWithPassword({
+      email: authEmail(row.username),
+      password: currentPassword,
+    });
+    if (verifyError) return { ok: false, error: 'Current password is incorrect' };
 
     const trimmedUsername = newUsername.trim() || row.username;
     if (trimmedUsername.toLowerCase() !== row.username.toLowerCase()) {
@@ -85,8 +140,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (existing) return { ok: false, error: 'That username is already taken' };
     }
 
-    const newHash = newPassword ? await hashPassword(trimmedUsername, newPassword) : row.password_hash;
+    const authUpdates: { email?: string; password?: string } = {};
+    if (trimmedUsername.toLowerCase() !== row.username.toLowerCase()) authUpdates.email = authEmail(trimmedUsername);
+    if (newPassword) authUpdates.password = newPassword;
 
+    if (Object.keys(authUpdates).length > 0) {
+      const { error: authError } = await supabase.auth.updateUser(authUpdates);
+      if (authError) return { ok: false, error: 'Could not save changes' };
+    }
+
+    const newHash = newPassword ? await hashPassword(trimmedUsername, newPassword) : row.password_hash;
     const { error } = await supabase
       .from('users')
       .update({ username: trimmedUsername.toLowerCase(), password_hash: newHash })
@@ -96,7 +159,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const updatedUser: AppUser = { ...user, username: trimmedUsername.toLowerCase() };
     setUser(updatedUser);
-    localStorage.setItem('gohar_user', JSON.stringify(updatedUser));
     return { ok: true };
   };
 

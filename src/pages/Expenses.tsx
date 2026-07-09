@@ -14,6 +14,7 @@ import {
 import { supabase } from '../utils/supabase';
 import { formatKES, formatDate, todayStr } from '../utils/format';
 import { adjustSupplierBalance, adjustLoanBalance } from '../utils/balances';
+import { insertTransactionWithId } from '../utils/transactionId';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -119,24 +120,6 @@ export default function Expenses() {
     fetchData();
   }
 
-  async function getNextTransactionId(date: string, type: string = 'EXP'): Promise<string> {
-    const prefix = type + '-' + date.replace(/-/g, '');
-    const { data } = await supabase
-      .from('transactions')
-      .select('transaction_id')
-      .like('transaction_id', `${prefix}%`)
-      .order('transaction_id', { ascending: false })
-      .limit(1);
-
-    let seq = 1;
-    if (data && data.length > 0) {
-      const last = data[0].transaction_id;
-      const match = last.match(/-(\d{3})$/);
-      if (match) seq = parseInt(match[1]) + 1;
-    }
-    return `${prefix}-${String(seq).padStart(3, '0')}`;
-  }
-
   async function handleSave() {
     if (!form.amount || parseFloat(form.amount) <= 0) return;
 
@@ -148,8 +131,7 @@ export default function Expenses() {
       const supp = suppliers.find((s) => s.id === form.supplierId);
       if (!supp) return;
 
-      const txnId = await getNextTransactionId(form.date, 'SUP');
-      await supabase.from('transactions').insert({
+      const { data: newTxn, error } = await insertTransactionWithId('SUP-' + form.date.replace(/-/g, ''), (txnId) => ({
         transaction_id: txnId,
         date: form.date,
         type: 'supplier_payment',
@@ -159,7 +141,8 @@ export default function Expenses() {
         description: form.description || `Payment to ${supp.name}`,
         notes: form.notes || null,
         created_by: user?.username || null,
-      });
+      }));
+      if (error || !newTxn) { console.error(error); alert('Failed to save payment: ' + (error?.message || 'unknown error')); return; }
       await adjustSupplierBalance(form.supplierId, -amt);
       setForm(emptyForm);
       setShowAdd(false);
@@ -174,8 +157,7 @@ export default function Expenses() {
       const loan = loans.find((l) => l.id === form.loanId);
       if (!loan) return;
 
-      const txnId = await getNextTransactionId(form.date, 'LOAN');
-      await supabase.from('transactions').insert({
+      const { data: newTxn, error } = await insertTransactionWithId('LOAN-' + form.date.replace(/-/g, ''), (txnId) => ({
         transaction_id: txnId,
         date: form.date,
         type: 'loan_payment',
@@ -185,7 +167,8 @@ export default function Expenses() {
         description: form.description || `Payment for ${loan.loan_name}`,
         notes: form.notes || null,
         created_by: user?.username || null,
-      });
+      }));
+      if (error || !newTxn) { console.error(error); alert('Failed to save payment: ' + (error?.message || 'unknown error')); return; }
       // Update loan balance
       await adjustLoanBalance(form.loanId, amt);
       setForm(emptyForm);
@@ -195,15 +178,13 @@ export default function Expenses() {
       return;
     }
 
-    const txnId = await getNextTransactionId(form.date);
-
     const isHomeExpense = activeTab === 'home';
     const category = isHomeExpense ? 'home_expense' : form.category;
 
     // Check if partner expense category
     const isPartnerExpense = category === 'taher' || category === 'abdulqadir';
 
-    const txnData: any = {
+    const { data: newTxn, error } = await insertTransactionWithId('EXP-' + form.date.replace(/-/g, ''), (txnId) => ({
       transaction_id: txnId,
       date: form.date,
       type: isPartnerExpense ? 'partner_draw' : 'expense',
@@ -216,10 +197,8 @@ export default function Expenses() {
       loan_id: form.loanId || null,
       partner_id: isPartnerExpense ? category : (isHomeExpense ? form.partnerId || null : null),
       created_by: user?.username || null,
-    };
-
-    const { data: newTxn, error } = await supabase.from('transactions').insert(txnData).select().single();
-    if (error) { console.error(error); return; }
+    }));
+    if (error || !newTxn) { console.error(error); alert('Failed to save expense: ' + (error?.message || 'unknown error')); return; }
 
     // Update supplier balance
     if (form.supplierId && (category === 'supplier_payment' || category === 'stock')) {

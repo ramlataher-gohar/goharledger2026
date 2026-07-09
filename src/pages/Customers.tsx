@@ -14,6 +14,7 @@ import {
 import { supabase } from '../utils/supabase';
 import { formatKES, formatDate, todayStr } from '../utils/format';
 import { adjustCustomerCredit, adjustCustomerAdvance } from '../utils/balances';
+import { insertTransactionWithId } from '../utils/transactionId';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -269,21 +270,7 @@ export default function Customers() {
 
     const amt = parseFloat(paymentForm.amount);
 
-    const { data: lastTxn } = await supabase
-      .from('transactions')
-      .select('transaction_id')
-      .like('transaction_id', 'PAY-%')
-      .order('transaction_id', { ascending: false })
-      .limit(1);
-
-    let seq = 1;
-    if (lastTxn && lastTxn.length > 0) {
-      const match = lastTxn[0].transaction_id.match(/-(\d{3})$/);
-      if (match) seq = parseInt(match[1]) + 1;
-    }
-    const txnId = `PAY-${paymentForm.date.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
-
-    await supabase.from('transactions').insert({
+    const { data: newTxn, error } = await insertTransactionWithId('PAY-' + paymentForm.date.replace(/-/g, ''), (txnId) => ({
       transaction_id: txnId,
       date: paymentForm.date,
       type: 'customer_payment',
@@ -293,7 +280,8 @@ export default function Customers() {
       description: `Payment from ${selectedCustomer.name}`,
       notes: paymentForm.notes || null,
       created_by: user?.username || null,
-    });
+    }));
+    if (error || !newTxn) { console.error(error); alert('Failed to save payment: ' + (error?.message || 'unknown error')); return; }
 
     await adjustCustomerCredit(selectedCustomer.id, -amt);
 
@@ -307,21 +295,7 @@ export default function Customers() {
 
     const amt = parseFloat(paymentForm.amount);
 
-    const { data: lastTxn } = await supabase
-      .from('transactions')
-      .select('transaction_id')
-      .like('transaction_id', 'ADV-%')
-      .order('transaction_id', { ascending: false })
-      .limit(1);
-
-    let seq = 1;
-    if (lastTxn && lastTxn.length > 0) {
-      const match = lastTxn[0].transaction_id.match(/-(\d{3})$/);
-      if (match) seq = parseInt(match[1]) + 1;
-    }
-    const txnId = `ADV-${paymentForm.date.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
-
-    await supabase.from('transactions').insert({
+    const { data: newTxn, error } = await insertTransactionWithId('ADV-' + paymentForm.date.replace(/-/g, ''), (txnId) => ({
       transaction_id: txnId,
       date: paymentForm.date,
       type: 'customer_payment',
@@ -331,7 +305,8 @@ export default function Customers() {
       description: `Advance from ${selectedCustomer.name}`,
       notes: paymentForm.notes || null,
       created_by: user?.username || null,
-    });
+    }));
+    if (error || !newTxn) { console.error(error); alert('Failed to save advance: ' + (error?.message || 'unknown error')); return; }
 
     await adjustCustomerAdvance(selectedCustomer.id, amt);
 

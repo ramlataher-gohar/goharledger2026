@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
 import { formatKES, formatDate, getMonthLabel, todayStr } from '../utils/format';
+import { insertTransactionWithId } from '../utils/transactionId';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -111,21 +112,7 @@ export default function Partners() {
     if (!drawForm.amount || parseFloat(drawForm.amount) <= 0) return;
 
     const amt = parseFloat(drawForm.amount);
-    const { data: lastTxn } = await supabase
-      .from('transactions')
-      .select('transaction_id')
-      .like('transaction_id', 'DRW-%')
-      .order('transaction_id', { ascending: false })
-      .limit(1);
-
-    let seq = 1;
-    if (lastTxn && lastTxn.length > 0) {
-      const match = lastTxn[0].transaction_id.match(/-(\d{3})$/);
-      if (match) seq = parseInt(match[1]) + 1;
-    }
-    const txnId = `DRW-${drawForm.date.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
-
-    await supabase.from('transactions').insert({
+    const { data: newTxn, error } = await insertTransactionWithId('DRW-' + drawForm.date.replace(/-/g, ''), (txnId) => ({
       transaction_id: txnId,
       date: drawForm.date,
       type: 'partner_draw',
@@ -135,7 +122,8 @@ export default function Partners() {
       description: `Partner draw - ${activePartner}`,
       notes: drawForm.notes || null,
       created_by: user?.username || null,
-    });
+    }));
+    if (error || !newTxn) { console.error(error); alert('Failed to save draw: ' + (error?.message || 'unknown error')); return; }
 
     setDrawForm(emptyDraw);
     setShowDraw(false);
@@ -147,21 +135,7 @@ export default function Partners() {
     if (!returnForm.amount || parseFloat(returnForm.amount) <= 0) return;
 
     const amt = parseFloat(returnForm.amount);
-    const { data: lastTxn } = await supabase
-      .from('transactions')
-      .select('transaction_id')
-      .like('transaction_id', 'RET-%')
-      .order('transaction_id', { ascending: false })
-      .limit(1);
-
-    let seq = 1;
-    if (lastTxn && lastTxn.length > 0) {
-      const match = lastTxn[0].transaction_id.match(/-(\d{3})$/);
-      if (match) seq = parseInt(match[1]) + 1;
-    }
-    const txnId = `RET-${returnForm.date.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
-
-    await supabase.from('transactions').insert({
+    const { data: newTxn, error } = await insertTransactionWithId('RET-' + returnForm.date.replace(/-/g, ''), (txnId) => ({
       transaction_id: txnId,
       date: returnForm.date,
       type: 'partner_loan',
@@ -171,7 +145,8 @@ export default function Partners() {
       description: `Partner return - ${activePartner}`,
       notes: returnForm.notes || null,
       created_by: user?.username || null,
-    });
+    }));
+    if (error || !newTxn) { console.error(error); alert('Failed to save return: ' + (error?.message || 'unknown error')); return; }
 
     setReturnForm(emptyDraw);
     setShowReturn(false);
@@ -183,46 +158,34 @@ export default function Partners() {
     if (!showMarkTaken || !markForm.amount || parseFloat(markForm.amount) <= 0) return;
 
     const amt = parseFloat(markForm.amount);
-    const { data: lastTxn } = await supabase
-      .from('transactions')
-      .select('transaction_id')
-      .like('transaction_id', 'TKN-%')
-      .order('transaction_id', { ascending: false })
-      .limit(1);
-
-    let seq = 1;
-    if (lastTxn && lastTxn.length > 0) {
-      const match = lastTxn[0].transaction_id.match(/-(\d{3})$/);
-      if (match) seq = parseInt(match[1]) + 1;
-    }
-    const txnId = `TKN-${markForm.date.replace(/-/g, '')}-${String(seq).padStart(3, '0')}`;
-
-    if (showMarkTaken.type === 'profit') {
-      await supabase.from('transactions').insert({
-        transaction_id: txnId,
-        date: markForm.date,
-        type: 'partner_draw',
-        primary_mode: markForm.mode,
-        amount: amt,
-        partner_id: activePartner,
-        description: `Profit share taken - ${activePartner}`,
-        notes: markForm.notes || null,
-        created_by: user?.username || null,
-      });
-    } else {
-      await supabase.from('transactions').insert({
-        transaction_id: txnId,
-        date: markForm.date,
-        type: 'expense',
-        primary_mode: markForm.mode,
-        amount: amt,
-        partner_id: activePartner,
-        category: 'home_expense',
-        description: `Home expense repaid - ${activePartner}`,
-        notes: `From Shop | repaying ${showMarkTaken.id}`,
-        created_by: user?.username || null,
-      });
-    }
+    const isProfitShare = showMarkTaken.type === 'profit';
+    const { data: newTxn, error } = await insertTransactionWithId('TKN-' + markForm.date.replace(/-/g, ''), (txnId) =>
+      isProfitShare
+        ? {
+            transaction_id: txnId,
+            date: markForm.date,
+            type: 'partner_draw',
+            primary_mode: markForm.mode,
+            amount: amt,
+            partner_id: activePartner,
+            description: `Profit share taken - ${activePartner}`,
+            notes: markForm.notes || null,
+            created_by: user?.username || null,
+          }
+        : {
+            transaction_id: txnId,
+            date: markForm.date,
+            type: 'expense',
+            primary_mode: markForm.mode,
+            amount: amt,
+            partner_id: activePartner,
+            category: 'home_expense',
+            description: `Home expense repaid - ${activePartner}`,
+            notes: `From Shop | repaying ${showMarkTaken.id}`,
+            created_by: user?.username || null,
+          }
+    );
+    if (error || !newTxn) { console.error(error); alert('Failed to save: ' + (error?.message || 'unknown error')); return; }
 
     setShowMarkTaken(null);
     setMarkForm(emptyDraw);
