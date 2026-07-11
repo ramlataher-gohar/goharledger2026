@@ -459,8 +459,8 @@ export default function Dashboard() {
 
       const totalSuppliersOwed = (suppData || []).reduce((sum, s) => sum + (s.balance || 0), 0);
       const totalCustomersPending = (custData || []).reduce((sum, c) => sum + (c.credit_balance || 0), 0);
-      const totalNetProfit = totalGrossProfit - totalShopExpenses - totalHomeExpenses - totalPartnerDraws - totalLoanPayments;
-      const monthNetProfit = monthGrossProfit - monthShopExpenses - monthHomeExpenses - monthPartnerDraws - monthLoanPayments;
+      const totalNetProfit = totalGrossProfit - totalShopExpenses - totalHomeExpenses - totalLoanPayments;
+      const monthNetProfit = monthGrossProfit - monthShopExpenses - monthHomeExpenses - monthLoanPayments;
       const totalCapitalVal = (capitalData || []).reduce((sum, c) => sum + (c.amount || 0), 0);
 
       setStats({
