@@ -18,6 +18,8 @@ import { insertTransactionWithId } from '../utils/transactionId';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
+import DateFilterBar from '../components/DateFilterBar';
+import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
 import type { Transaction, Supplier, LoanTracker, ExpenseCategory } from '../types';
 
 interface ExpenseForm {
@@ -66,6 +68,9 @@ export default function Expenses() {
   const [form, setForm] = useState<ExpenseForm>(emptyForm);
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
+  const [datePreset, setDatePreset] = useState<DatePreset>('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -392,11 +397,13 @@ export default function Expenses() {
     triggerRefresh();
   }
 
+  const { from: rangeFrom, to: rangeTo } = getDatePresetRange(datePreset, customFrom, customTo);
   const grouped = new Map<string, Transaction[]>();
   const filtered = expenses.filter((e) => {
     if (e.is_void) return false;
     if (search && !e.description?.toLowerCase().includes(search.toLowerCase())) return false;
     if (filterCategory && e.category !== filterCategory) return false;
+    if (e.date < rangeFrom || e.date > rangeTo) return false;
     return true;
   });
 
@@ -502,6 +509,15 @@ export default function Expenses() {
             {shopSelectableCategories.map((c) => <option key={c.id} value={c.name}>{c.name.replace('_', ' ')}</option>)}
           </select>
         )}
+      </div>
+
+      <div className="bg-white p-3 rounded-lg border border-slate-200">
+        <DateFilterBar
+          preset={datePreset}
+          customFrom={customFrom}
+          customTo={customTo}
+          onChange={(p, from, to) => { setDatePreset(p); setCustomFrom(from); setCustomTo(to); }}
+        />
       </div>
 
       {/* Add/Edit Modal */}

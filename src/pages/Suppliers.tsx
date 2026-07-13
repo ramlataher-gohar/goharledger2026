@@ -16,6 +16,8 @@ import { insertTransactionWithId } from '../utils/transactionId';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
+import DateFilterBar from '../components/DateFilterBar';
+import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
 import type { Supplier, Transaction } from '../types';
 
 interface SupplierForm {
@@ -88,6 +90,9 @@ export default function Suppliers() {
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showLedger, setShowLedger] = useState(false);
+  const [txnDatePreset, setTxnDatePreset] = useState<DatePreset>('three_months');
+  const [txnCustomFrom, setTxnCustomFrom] = useState('');
+  const [txnCustomTo, setTxnCustomTo] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -325,7 +330,10 @@ export default function Suppliers() {
   }
 
   function getSupplierTransactions(supplierId: string) {
-    return transactions.filter((t) => t.supplier_id === supplierId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const { from, to } = getDatePresetRange(txnDatePreset, txnCustomFrom, txnCustomTo);
+    return transactions
+      .filter((t) => t.supplier_id === supplierId && t.date >= from && t.date <= to)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }
 
   const filteredSuppliers = suppliers.filter((s) =>
@@ -490,7 +498,15 @@ export default function Suppliers() {
               </div>
 
               {/* Transaction History */}
-              <h4 className="text-sm font-semibold text-slate-700 mb-2">Transaction History</h4>
+              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <h4 className="text-sm font-semibold text-slate-700">Transaction History</h4>
+                <DateFilterBar
+                  preset={txnDatePreset}
+                  customFrom={txnCustomFrom}
+                  customTo={txnCustomTo}
+                  onChange={(p, from, to) => { setTxnDatePreset(p); setTxnCustomFrom(from); setTxnCustomTo(to); }}
+                />
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
