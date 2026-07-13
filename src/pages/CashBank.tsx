@@ -15,6 +15,8 @@ import { insertTransactionWithId } from '../utils/transactionId';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
+import DateFilterBar from '../components/DateFilterBar';
+import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
 import type { Transaction } from '../types';
 
 interface TransferForm {
@@ -43,6 +45,9 @@ export default function CashBank() {
   const [showTransfer, setShowTransfer] = useState(false);
   const [transferForm, setTransferForm] = useState<TransferForm>(emptyTransfer);
   const [reconcileMode, setReconcileMode] = useState<string>('');
+  const [ledgerDatePreset, setLedgerDatePreset] = useState<DatePreset>('month');
+  const [ledgerCustomFrom, setLedgerCustomFrom] = useState('');
+  const [ledgerCustomTo, setLedgerCustomTo] = useState('');
   const [reconcileAmount, setReconcileAmount] = useState('');
   const [showLedger, setShowLedger] = useState(false);
   const [showOpeningBalance, setShowOpeningBalance] = useState(false);
@@ -331,7 +336,10 @@ export default function CashBank() {
       }
     });
 
-    return entries;
+    // Running balance is computed over full history above (so it stays
+    // correct); only the displayed rows are narrowed to the selected range.
+    const { from, to } = getDatePresetRange(ledgerDatePreset, ledgerCustomFrom, ledgerCustomTo);
+    return entries.filter((e) => e.date >= from && e.date <= to);
   }
 
   const balances = calculateBalances();
@@ -537,10 +545,16 @@ export default function CashBank() {
 
       {/* Ledger */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
-        <div className="px-4 py-3 border-b border-slate-100">
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
           <h3 className="font-semibold text-slate-800">
             {activeMode === 'all' ? 'Combined Ledger' : `${activeMode.charAt(0).toUpperCase() + activeMode.slice(1)} Ledger`}
           </h3>
+          <DateFilterBar
+            preset={ledgerDatePreset}
+            customFrom={ledgerCustomFrom}
+            customTo={ledgerCustomTo}
+            onChange={(p, from, to) => { setLedgerDatePreset(p); setLedgerCustomFrom(from); setLedgerCustomTo(to); }}
+          />
         </div>
         {loading ? (
           <div className="p-8 text-center text-slate-400">Loading...</div>

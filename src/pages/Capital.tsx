@@ -17,6 +17,8 @@ import { insertTransactionWithId } from '../utils/transactionId';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
+import DateFilterBar from '../components/DateFilterBar';
+import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
 import type { CapitalEntry, LoanTracker, HistoricalProfit, Transaction } from '../types';
 
 interface CapitalForm {
@@ -48,6 +50,9 @@ export default function Capital() {
   const [capitalEntries, setCapitalEntries] = useState<CapitalEntry[]>([]);
   const [loans, setLoans] = useState<LoanTracker[]>([]);
   const [loanPayments, setLoanPayments] = useState<Transaction[]>([]);
+  const [historyDatePreset, setHistoryDatePreset] = useState<DatePreset>('three_months');
+  const [historyCustomFrom, setHistoryCustomFrom] = useState('');
+  const [historyCustomTo, setHistoryCustomTo] = useState('');
   const [historicalProfit, setHistoricalProfit] = useState<HistoricalProfit[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCapital, setShowCapital] = useState(false);
@@ -401,6 +406,11 @@ export default function Capital() {
     .reduce((s, c) => s + c.amount, 0);
   const totalCapital = taherCapital + abdulqadirCapital;
 
+  // Capital History table only - the summary totals above always use the
+  // full history, regardless of this filter.
+  const { from: historyFrom, to: historyTo } = getDatePresetRange(historyDatePreset, historyCustomFrom, historyCustomTo);
+  const filteredCapitalEntries = capitalEntries.filter((c) => c.date >= historyFrom && c.date <= historyTo);
+
   const idrisLoan = loans.find((l) => l.loan_name.toLowerCase().includes('idris'));
 
   return (
@@ -585,9 +595,17 @@ export default function Capital() {
 
       {/* Capital History */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
-          <TrendingUp size={18} className="text-emerald-500" />
-          <h3 className="font-semibold text-slate-800">Capital History</h3>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <TrendingUp size={18} className="text-emerald-500" />
+            <h3 className="font-semibold text-slate-800">Capital History</h3>
+          </div>
+          <DateFilterBar
+            preset={historyDatePreset}
+            customFrom={historyCustomFrom}
+            customTo={historyCustomTo}
+            onChange={(p, from, to) => { setHistoryDatePreset(p); setHistoryCustomFrom(from); setHistoryCustomTo(to); }}
+          />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -602,10 +620,10 @@ export default function Capital() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {capitalEntries.length === 0 ? (
+              {filteredCapitalEntries.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No capital entries</td></tr>
               ) : (
-                capitalEntries.map((c) => (
+                filteredCapitalEntries.map((c) => (
                   <tr key={c.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-2 text-slate-600">{formatDate(c.date)}</td>
                     <td className="px-4 py-2 capitalize font-medium text-slate-800">{c.partner_id}</td>
