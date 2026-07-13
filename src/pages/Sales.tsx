@@ -20,6 +20,8 @@ import { adjustCustomerCredit, adjustCustomerAdvance, adjustSupplierBalance } fr
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
+import DateFilterBar from '../components/DateFilterBar';
+import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
 import type { Transaction, Customer, Supplier } from '../types';
 
 type SaleMode = 'cash' | 'mpesa' | 'paybill' | 'split' | 'credit' | 'advance' | 'supplier';
@@ -81,7 +83,9 @@ export default function Sales() {
   const [bulkForms, setBulkForms] = useState<SaleForm[]>([emptyForm, emptyForm, emptyForm]);
   const [search, setSearch] = useState('');
   const [filterMode, setFilterMode] = useState<string>('');
-  const [filterDate, setFilterDate] = useState('');
+  const [datePreset, setDatePreset] = useState<DatePreset>('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
   const [showLedger, setShowLedger] = useState(false);
   const [showQuickAddCustomer, setShowQuickAddCustomer] = useState(false);
@@ -529,12 +533,13 @@ export default function Sales() {
     setShowAdd(true);
   }
 
+  const { from: rangeFrom, to: rangeTo } = getDatePresetRange(datePreset, customFrom, customTo);
   const grouped = new Map<string, Transaction[]>();
   const filtered = sales.filter((s) => {
     if (s.is_void) return false;
     if (search && !s.description?.toLowerCase().includes(search.toLowerCase()) && !s.transaction_id.toLowerCase().includes(search.toLowerCase())) return false;
     if (filterMode && s.primary_mode !== filterMode) return false;
-    if (filterDate && s.date !== filterDate) return false;
+    if (s.date < rangeFrom || s.date > rangeTo) return false;
     return true;
   });
 
@@ -595,20 +600,23 @@ export default function Sales() {
           <option value="advance">Advance</option>
           <option value="supplier">Supplier</option>
         </select>
-        <input
-          type="date"
-          value={filterDate}
-          onChange={(e) => setFilterDate(e.target.value)}
-          className="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-        />
-        {(search || filterMode || filterDate) && (
+        {search && (
           <button
-            onClick={() => { setSearch(''); setFilterMode(''); setFilterDate(''); }}
+            onClick={() => setSearch('')}
             className="text-sm text-slate-500 hover:text-slate-700"
           >
-            Clear
+            Clear search
           </button>
         )}
+      </div>
+
+      <div className="bg-white p-3 rounded-lg border border-slate-200">
+        <DateFilterBar
+          preset={datePreset}
+          customFrom={customFrom}
+          customTo={customTo}
+          onChange={(p, from, to) => { setDatePreset(p); setCustomFrom(from); setCustomTo(to); }}
+        />
       </div>
 
       {/* Add/Edit Modal */}

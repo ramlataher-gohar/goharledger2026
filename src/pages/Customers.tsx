@@ -18,6 +18,8 @@ import { insertTransactionWithId } from '../utils/transactionId';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
+import DateFilterBar from '../components/DateFilterBar';
+import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
 import type { Customer, Transaction } from '../types';
 
 interface CustomerForm {
@@ -90,6 +92,9 @@ export default function Customers() {
   const [showLedger, setShowLedger] = useState(false);
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [saleEditForm, setSaleEditForm] = useState<SaleEditForm>(emptySaleEdit);
+  const [txnDatePreset, setTxnDatePreset] = useState<DatePreset>('three_months');
+  const [txnCustomFrom, setTxnCustomFrom] = useState('');
+  const [txnCustomTo, setTxnCustomTo] = useState('');
 
   useEffect(() => {
     fetchData();
@@ -316,7 +321,8 @@ export default function Customers() {
   }
 
   function getCustomerTransactions(customerId: string) {
-    return transactions.filter((t) => t.customer_id === customerId);
+    const { from, to } = getDatePresetRange(txnDatePreset, txnCustomFrom, txnCustomTo);
+    return transactions.filter((t) => t.customer_id === customerId && t.date >= from && t.date <= to);
   }
 
   function getCreditSales(customerId: string) {
@@ -705,7 +711,15 @@ export default function Customers() {
               </div>
 
               {/* Transaction History */}
-              <h4 className="text-sm font-semibold text-slate-700 mb-2">Transaction History</h4>
+              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <h4 className="text-sm font-semibold text-slate-700">Transaction History</h4>
+                <DateFilterBar
+                  preset={txnDatePreset}
+                  customFrom={txnCustomFrom}
+                  customTo={txnCustomTo}
+                  onChange={(p, from, to) => { setTxnDatePreset(p); setTxnCustomFrom(from); setTxnCustomTo(to); }}
+                />
+              </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
