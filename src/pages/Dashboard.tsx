@@ -77,14 +77,12 @@ function calculateBalanceAsOf(allTxns: Transaction[] | null | undefined, splitMa
         else if (t.commission_mode === 'paybill') bank -= t.commission;
       }
     } else if (t.type === 'expense') {
-      if (t.category !== 'stock' && t.category !== 'supplier_payment') {
-        const isHomeExpenseFromOwnPocket = t.category === 'home_expense' && t.notes?.includes('From Own Pocket');
-        const isPendingClear = t.clears_on && t.clears_on >= cutoffDate;
-        if (!isHomeExpenseFromOwnPocket && !isPendingClear) {
-          if (t.primary_mode === 'mpesa') mpesa -= t.amount;
-          else if (t.primary_mode === 'cash') cash -= t.amount;
-          else if (t.primary_mode === 'paybill') bank -= t.amount;
-        }
+      const isHomeExpenseFromOwnPocket = t.category === 'home_expense' && t.notes?.includes('From Own Pocket');
+      const isPendingClear = t.clears_on && t.clears_on >= cutoffDate;
+      if (!isHomeExpenseFromOwnPocket && !isPendingClear) {
+        if (t.primary_mode === 'mpesa') mpesa -= t.amount;
+        else if (t.primary_mode === 'cash') cash -= t.amount;
+        else if (t.primary_mode === 'paybill') bank -= t.amount;
       }
     } else if (t.type === 'fund_transfer') {
       const desc = (t.description || '').toLowerCase();
@@ -378,17 +376,14 @@ export default function Dashboard() {
             else if (t.commission_mode === 'paybill') bank -= t.commission;
           }
         } else if (t.type === 'expense') {
-          // Only shop expenses (NOT supplier invoices which have category='stock')
-          if (t.category !== 'stock' && t.category !== 'supplier_payment') {
-            const isHomeExpenseFromOwnPocket = t.category === 'home_expense' && t.notes?.includes('From Own Pocket');
-            // A post-dated cheque hasn't left the bank yet - don't deduct it
-            // until its "clears on" date actually arrives.
-            const isPendingClear = t.clears_on && t.clears_on > today;
-            if (!isHomeExpenseFromOwnPocket && !isPendingClear) {
-              if (t.primary_mode === 'mpesa') mpesa -= t.amount;
-              else if (t.primary_mode === 'cash') cash -= t.amount;
-              else if (t.primary_mode === 'paybill') bank -= t.amount;
-            }
+          const isHomeExpenseFromOwnPocket = t.category === 'home_expense' && t.notes?.includes('From Own Pocket');
+          // A post-dated cheque hasn't left the bank yet - don't deduct it
+          // until its "clears on" date actually arrives.
+          const isPendingClear = t.clears_on && t.clears_on > today;
+          if (!isHomeExpenseFromOwnPocket && !isPendingClear) {
+            if (t.primary_mode === 'mpesa') mpesa -= t.amount;
+            else if (t.primary_mode === 'cash') cash -= t.amount;
+            else if (t.primary_mode === 'paybill') bank -= t.amount;
           }
         } else if (t.type === 'fund_transfer') {
           const desc = (t.description || '').toLowerCase();

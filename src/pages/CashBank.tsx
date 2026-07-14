@@ -118,13 +118,11 @@ export default function CashBank() {
           else if (t.commission_mode === 'paybill') paybill -= t.commission;
         }
       } else if (t.type === 'expense') {
-        // Only deduct shop expenses (NOT supplier payments - those are separate)
         const isHomeExpenseFromOwnPocket = t.category === 'home_expense' && t.notes?.includes('From Own Pocket');
-        const isSupplierPayment = t.category === 'supplier_payment' || t.category === 'stock';
         // A post-dated cheque hasn't left the bank yet - don't deduct it
         // until its "clears on" date actually arrives.
         const isPendingClear = t.clears_on && t.clears_on > todayStr();
-        if (!isHomeExpenseFromOwnPocket && !isSupplierPayment && !isPendingClear) {
+        if (!isHomeExpenseFromOwnPocket && !isPendingClear) {
           if (t.primary_mode === 'mpesa') mpesa -= t.amount;
           else if (t.primary_mode === 'cash') cash -= t.amount;
           else if (t.primary_mode === 'paybill') paybill -= t.amount;
@@ -295,9 +293,8 @@ export default function CashBank() {
         }
       } else if (t.type === 'expense') {
         const isHomeExpenseFromOwnPocket = t.category === 'home_expense' && t.notes?.includes('From Own Pocket');
-        const isSupplierPayment = t.category === 'supplier_payment' || t.category === 'stock';
         const isPendingClear = t.clears_on && t.clears_on > todayStr();
-        if (!isHomeExpenseFromOwnPocket && !isSupplierPayment && !isPendingClear) {
+        if (!isHomeExpenseFromOwnPocket && !isPendingClear) {
           if (mode === 'all') {
             if (t.primary_mode === 'mpesa') debit += t.amount;
             else if (t.primary_mode === 'cash') debit += t.amount;
