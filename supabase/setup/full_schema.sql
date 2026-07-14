@@ -882,3 +882,15 @@ ALTER TABLE transactions ADD COLUMN IF NOT EXISTS refunded_of text;
 
 DROP POLICY IF EXISTS "select_users" ON users;
 CREATE POLICY "select_users" ON users FOR SELECT TO authenticated USING (true);
+
+-- ===== 20260714120000_add_clears_on_to_transactions.sql =====
+/*
+# Add clears_on to transactions
+
+`clears_on` marks a post-dated cheque or delayed payment as not affecting
+wallet balances until the date it actually clears. It's used throughout
+the app's balance calculations but was missing from the checked-in
+migrations - this adds it so a fresh install matches the live database.
+*/
+
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS clears_on date;
