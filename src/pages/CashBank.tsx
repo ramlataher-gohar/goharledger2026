@@ -13,6 +13,7 @@ import { supabase } from '../utils/supabase';
 import { formatKES, formatDate, todayStr } from '../utils/format';
 import { insertTransactionWithId } from '../utils/transactionId';
 import { fetchAllRows } from '../utils/fetchAll';
+import { computeWalletBalance, tomorrowStr } from '../utils/walletBalance';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import LedgerModal from '../components/LedgerModal';
@@ -74,104 +75,15 @@ export default function CashBank() {
   }
 
   function calculateBalances() {
-    let mpesa = 0, cash = 0, paybill = 0;
-    let mpesaAdvance = 0, cashAdvance = 0, paybillAdvance = 0;
     const splitMap = new Map<string, { mode: string; amount: number }[]>();
     splits.forEach((s) => {
       if (!splitMap.has(s.transaction_id)) splitMap.set(s.transaction_id, []);
       splitMap.get(s.transaction_id)!.push(s);
     });
-
-    transactions.forEach((t) => {
-      // Sales add to balance
-      if (t.type === 'sale') {
-        if (t.primary_mode === 'mpesa') {
-          mpesa += t.amount;
-        }
-        else if (t.primary_mode === 'cash') {
-          cash += t.amount;
-        }
-        else if (t.primary_mode === 'paybill') {
-          paybill += t.amount;
-        }
-        // 'advance' mode sales don't add anything here - that cash was already
-        // counted when the advance was deposited (a customer_payment below), so
-        // counting it again here would double it. It reduces the "held for
-        // customers" sub-line instead, since it's no longer an outstanding advance.
-        else if (t.primary_mode === 'advance') {
-          if (t.settlement_mode === 'mpesa') mpesaAdvance -= t.amount;
-          else if (t.settlement_mode === 'cash') cashAdvance -= t.amount;
-          else if (t.settlement_mode === 'paybill') paybillAdvance -= t.amount;
-        }
-        else if (t.primary_mode === 'split') {
-          const s = splitMap.get(t.transaction_id) || [];
-          s.forEach((sp) => {
-            if (sp.mode === 'mpesa') mpesa += sp.amount;
-            else if (sp.mode === 'cash') cash += sp.amount;
-            else if (sp.mode === 'paybill') paybill += sp.amount;
-          });
-        }
-        // Deduct commission from the respective mode
-        if (t.commission && t.commission > 0 && t.commission_mode) {
-          if (t.commission_mode === 'mpesa') mpesa -= t.commission;
-          else if (t.commission_mode === 'cash') cash -= t.commission;
-          else if (t.commission_mode === 'paybill') paybill -= t.commission;
-        }
-      } else if (t.type === 'expense') {
-        const isHomeExpenseFromOwnPocket = t.category === 'home_expense' && t.notes?.includes('From Own Pocket');
-        // A post-dated cheque hasn't left the bank yet - don't deduct it
-        // until its "clears on" date actually arrives.
-        const isPendingClear = t.clears_on && t.clears_on > todayStr();
-        if (!isHomeExpenseFromOwnPocket && !isPendingClear) {
-          if (t.primary_mode === 'mpesa') mpesa -= t.amount;
-          else if (t.primary_mode === 'cash') cash -= t.amount;
-          else if (t.primary_mode === 'paybill') paybill -= t.amount;
-        }
-      } else if (t.type === 'customer_payment') {
-        const isAdvanceDeposit = t.description?.startsWith('Advance from') || t.transaction_id.startsWith('OPN-ADV-');
-        if (t.primary_mode === 'mpesa') { mpesa += t.amount; if (isAdvanceDeposit) mpesaAdvance += t.amount; }
-        else if (t.primary_mode === 'cash') { cash += t.amount; if (isAdvanceDeposit) cashAdvance += t.amount; }
-        else if (t.primary_mode === 'paybill') { paybill += t.amount; if (isAdvanceDeposit) paybillAdvance += t.amount; }
-      } else if (t.type === 'opening_balance') {
-        if (t.primary_mode === 'mpesa') mpesa += t.amount;
-        else if (t.primary_mode === 'cash') cash += t.amount;
-        else if (t.primary_mode === 'paybill') paybill += t.amount;
-      } else if (t.type === 'supplier_payment') {
-        // Supplier payments deduct from mode balance, unless it's a
-        // post-dated cheque that hasn't cleared the bank yet.
-        if (!(t.clears_on && t.clears_on > todayStr())) {
-          if (t.primary_mode === 'mpesa') mpesa -= t.amount;
-          else if (t.primary_mode === 'cash') cash -= t.amount;
-          else if (t.primary_mode === 'paybill') paybill -= t.amount;
-        }
-      } else if (t.type === 'partner_draw') {
-        if (t.primary_mode === 'mpesa') mpesa -= t.amount;
-        else if (t.primary_mode === 'cash') cash -= t.amount;
-        else if (t.primary_mode === 'paybill') paybill -= t.amount;
-      } else if (t.type === 'partner_loan') {
-        if (t.primary_mode === 'mpesa') mpesa += t.amount;
-        else if (t.primary_mode === 'cash') cash += t.amount;
-        else if (t.primary_mode === 'paybill') paybill += t.amount;
-      } else if (t.type === 'loan_payment') {
-        if (t.primary_mode === 'mpesa') mpesa -= t.amount;
-        else if (t.primary_mode === 'cash') cash -= t.amount;
-        else if (t.primary_mode === 'paybill') paybill -= t.amount;
-      } else if (t.type === 'capital_entry') {
-        if (t.primary_mode === 'mpesa') mpesa += t.amount;
-        else if (t.primary_mode === 'cash') cash += t.amount;
-        else if (t.primary_mode === 'paybill') paybill += t.amount;
-      } else if (t.type === 'fund_transfer') {
-        const desc = (t.description || '').toLowerCase();
-        if (desc.includes('mpesa to cash')) { mpesa -= t.amount; cash += t.amount; }
-        else if (desc.includes('cash to mpesa')) { cash -= t.amount; mpesa += t.amount; }
-        else if (desc.includes('mpesa to paybill')) { mpesa -= t.amount; paybill += t.amount; }
-        else if (desc.includes('paybill to mpesa')) { paybill -= t.amount; mpesa += t.amount; }
-        else if (desc.includes('cash to paybill')) { cash -= t.amount; paybill += t.amount; }
-        else if (desc.includes('paybill to cash')) { paybill -= t.amount; cash += t.amount; }
-      }
-    });
-
-    return { mpesa, cash, paybill, mpesaAdvance, cashAdvance, paybillAdvance };
+    // transactions here is already fetched with is_void = false, so passing
+    // it straight through matches the previous behavior.
+    const { mpesa, cash, bank, mpesaAdvance, cashAdvance, bankAdvance } = computeWalletBalance(transactions, splitMap, tomorrowStr());
+    return { mpesa, cash, paybill: bank, mpesaAdvance, cashAdvance, paybillAdvance: bankAdvance };
   }
 
   async function handleTransfer() {
