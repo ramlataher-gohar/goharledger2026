@@ -260,8 +260,12 @@ export default function Reports() {
         expenseTotal += t.amount;
         // Stock/supplier payments made via the expense form are not shop overhead expenses
         const isSupplierPayment = t.category === 'supplier_payment' || t.category === 'stock';
-        if (t.category === 'home_expense') homeExpenseTotal += t.amount;
-        else if (!isSupplierPayment) shopExpenseTotal += t.amount;
+        if (t.category === 'home_expense') {
+          // Only the shop's own reimbursement ("From Shop") is a real shop
+          // expense - the original "From Own Pocket" entry is the partner's
+          // own money, counted once (here) instead of twice.
+          if (t.notes?.includes('From Shop')) homeExpenseTotal += t.amount;
+        } else if (!isSupplierPayment) shopExpenseTotal += t.amount;
       } else if (t.type === 'supplier_payment') {
         totalOut += t.amount;
         supplierPaymentTotal += t.amount;
@@ -281,7 +285,9 @@ export default function Reports() {
     });
 
     const grossProfit = salesTotal - costTotal - commissionTotal;
-    const netProfit = grossProfit - shopExpenseTotal - homeExpenseTotal - partnerDrawTotal - loanPaymentTotal;
+    // Partner draws are money partners take out of already-earned profit,
+    // not a business expense - excluded here to match Dashboard/Profit & Loss.
+    const netProfit = grossProfit - shopExpenseTotal - homeExpenseTotal - loanPaymentTotal;
 
     return {
       totalIn,
