@@ -49,7 +49,7 @@ interface SaleForm {
 }
 
 const emptyForm: SaleForm = {
-  date: new Date().toISOString().split('T')[0],
+  date: todayStr(),
   mode: 'cash',
   sellingPrice: '',
   costPrice: '',

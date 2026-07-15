@@ -40,7 +40,7 @@ interface ExpenseForm {
 }
 
 const emptyForm: ExpenseForm = {
-  date: new Date().toISOString().split('T')[0],
+  date: todayStr(),
   category: '',
   amount: '',
   mode: 'cash',
