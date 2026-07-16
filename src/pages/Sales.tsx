@@ -971,7 +971,7 @@ export default function Sales() {
                     <span className="text-xs text-slate-400 ml-2">Profit: KES {formatKES(dayProfit)}</span>
                   </button>
                   {isExpanded && (
-                    <div className="bg-slate-50">
+                    <div className="bg-slate-50 overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
@@ -1299,7 +1299,7 @@ function SaleFormFields({
   return (
     <div className="space-y-2">
       {/* Row 1: Date, Mode, Customer/Supplier */}
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <input
           type="date"
           value={form.date}
@@ -1373,7 +1373,7 @@ function SaleFormFields({
 
       {/* Inline quick-add customer */}
       {form.mode !== 'supplier' && showQuickAddCustomer && quickCustomer && setQuickCustomer && onQuickAddCustomer && (
-        <div className="grid grid-cols-4 gap-2 bg-emerald-50 border border-emerald-200 rounded p-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-emerald-50 border border-emerald-200 rounded p-2">
           <input
             type="text"
             value={quickCustomer.name}
@@ -1408,7 +1408,7 @@ function SaleFormFields({
 
       {/* Inline quick-add supplier */}
       {form.mode === 'supplier' && showQuickAddSupplier && quickSupplier && setQuickSupplier && onQuickAddSupplier && (
-        <div className="grid grid-cols-4 gap-2 bg-emerald-50 border border-emerald-200 rounded p-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-emerald-50 border border-emerald-200 rounded p-2">
           <input
             type="text"
             value={quickSupplier.name}
@@ -1457,7 +1457,7 @@ function SaleFormFields({
             Pay cost price to a supplier now
           </label>
           {form.payCostToSupplier && (
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div className="col-span-2 flex gap-1">
                 <select
                   value={form.costSupplierId}
@@ -1495,7 +1495,7 @@ function SaleFormFields({
             </div>
           )}
           {showQuickAddCostSupplier && quickCostSupplier && setQuickCostSupplier && (
-            <div className="grid grid-cols-4 gap-2 bg-emerald-50 border border-emerald-200 rounded p-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-emerald-50 border border-emerald-200 rounded p-2">
               <input
                 type="text"
                 value={quickCostSupplier.name}
@@ -1525,7 +1525,7 @@ function SaleFormFields({
       )}
 
       {/* Row 2: SP, CP, Commission */}
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <input
           type="number"
           value={form.sellingPrice}
@@ -1563,7 +1563,7 @@ function SaleFormFields({
 
       {/* Split amounts if split mode */}
       {form.mode === 'split' && (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <input
             type="number"
             value={form.splitMpesa}

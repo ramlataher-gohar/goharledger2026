@@ -597,7 +597,7 @@ export default function Expenses() {
           <div className="space-y-2">
             {/* Row 1: Date, Amount, Mode - no mode for "Own Pocket" home expenses,
                 since it's the partner's own money and no shop wallet is involved */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <input
                 type="date"
                 value={form.date}
@@ -839,7 +839,7 @@ export default function Expenses() {
                     <span className="ml-auto text-sm font-medium text-red-600">KES {formatKES(dayTotal)}</span>
                   </button>
                   {isExpanded && (
-                    <div className="bg-slate-50">
+                    <div className="bg-slate-50 overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="text-left text-xs text-slate-500 border-b border-slate-200">

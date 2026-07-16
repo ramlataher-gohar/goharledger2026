@@ -664,7 +664,7 @@ export default function Suppliers() {
               <button onClick={() => setShowPayment(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
             </div>
             <div className="space-y-2">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <input
                   type="number"
                   value={paymentForm.amount}
