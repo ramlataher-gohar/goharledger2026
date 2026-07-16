@@ -461,7 +461,7 @@ export default function Capital() {
             <button onClick={() => { setShowCapital(false); setEditingCapitalId(null); }} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
           </div>
           <div className="space-y-2">
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <select value={capitalForm.partnerId} onChange={(e) => setCapitalForm({ ...capitalForm, partnerId: e.target.value })} className="border border-slate-300 rounded px-2 py-1.5 text-sm">
                 <option value="taher">Taher</option>
                 <option value="abdulqadir">Abdulqadir</option>
@@ -503,7 +503,7 @@ export default function Capital() {
               <option value="">Select Loan</option>
               {loans.map((l) => <option key={l.id} value={l.id}>{l.loan_name} ({formatKES(l.remaining_balance)})</option>)}
             </select>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <input type="number" value={loanPaymentForm.amount} onChange={(e) => setLoanPaymentForm({ ...loanPaymentForm, amount: e.target.value })} placeholder="Amount" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
               <input type="date" value={loanPaymentForm.date} onChange={(e) => setLoanPaymentForm({ ...loanPaymentForm, date: e.target.value })} className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
               <select value={loanPaymentForm.mode} onChange={(e) => setLoanPaymentForm({ ...loanPaymentForm, mode: e.target.value })} className="border border-slate-300 rounded px-2 py-1.5 text-sm">
@@ -530,7 +530,7 @@ export default function Capital() {
               <input type="text" value={newLoanForm.loanName} onChange={(e) => setNewLoanForm({ ...newLoanForm, loanName: e.target.value })} placeholder="Loan Name" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
               <input type="number" value={newLoanForm.totalAmount} onChange={(e) => setNewLoanForm({ ...newLoanForm, totalAmount: e.target.value })} placeholder="Total Amount" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <input type="number" value={newLoanForm.amountPaid} onChange={(e) => setNewLoanForm({ ...newLoanForm, amountPaid: e.target.value })} placeholder="Paid" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
               <input type="number" value={newLoanForm.monthlyInstallment} onChange={(e) => setNewLoanForm({ ...newLoanForm, monthlyInstallment: e.target.value })} placeholder="Monthly" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
               <input type="date" value={newLoanForm.startDate} onChange={(e) => setNewLoanForm({ ...newLoanForm, startDate: e.target.value })} className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
@@ -554,7 +554,7 @@ export default function Capital() {
                 <input type="text" value={editLoanForm.loanName} onChange={(e) => setEditLoanForm({ ...editLoanForm, loanName: e.target.value })} placeholder="Loan Name" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
                 <input type="number" value={editLoanForm.totalAmount} onChange={(e) => setEditLoanForm({ ...editLoanForm, totalAmount: e.target.value })} placeholder="Total" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <input type="number" value={editLoanForm.amountPaid} onChange={(e) => setEditLoanForm({ ...editLoanForm, amountPaid: e.target.value })} placeholder="Paid" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
                 <input type="number" value={editLoanForm.monthlyInstallment} onChange={(e) => setEditLoanForm({ ...editLoanForm, monthlyInstallment: e.target.value })} placeholder="Monthly" className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
                 <input type="date" value={editLoanForm.startDate} onChange={(e) => setEditLoanForm({ ...editLoanForm, startDate: e.target.value })} className="border border-slate-300 rounded px-2 py-1.5 text-sm" />
