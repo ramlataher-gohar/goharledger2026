@@ -271,6 +271,23 @@ export default function Partners() {
     );
     if (error || !newTxn) { console.error(error); alert('Failed to save: ' + (error?.message || 'unknown error')); return; }
 
+    // The draw above records the money leaving - this updates the profit
+    // share record itself, so Remaining/Status actually reflect it (without
+    // this, the row stays "pending" forever and invites clicking it again).
+    if (isProfitShare) {
+      const histRow = historicalProfit.find((h) => h.month === showMarkTaken.id);
+      if (histRow) {
+        const field = activePartner === 'taher' ? 'taher_taken' : 'abdulqadir_taken';
+        const { error: histError } = await supabase
+          .from('historical_profit')
+          .update({ [field]: (histRow[field] || 0) + amt })
+          .eq('id', histRow.id);
+        if (histError) {
+          alert('The draw was saved, but updating the profit share record failed: ' + histError.message + '. Please check the Capital page.');
+        }
+      }
+    }
+
     setShowMarkTaken(null);
     setMarkForm(emptyDraw);
     fetchData();
