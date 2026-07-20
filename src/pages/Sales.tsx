@@ -851,9 +851,10 @@ export default function Sales() {
         />
       </div>
 
-      {/* Add/Edit Modal */}
+      {/* Add/Edit Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showAdd && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-slate-800">{editingId ? 'Edit Sale' : 'Add Sale'}</h3>
             <button onClick={() => { setShowAdd(false); setEditingId(null); }} className="p-1 hover:bg-slate-100 rounded">
@@ -894,6 +895,7 @@ export default function Sales() {
               }
             }}
           />
+        </div>
         </div>
       )}
 
