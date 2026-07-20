@@ -453,9 +453,13 @@ export default function Capital() {
         </button>
       </div>
 
-      {/* Capital Entry Modal */}
+      {/* Capital Entry Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showCapital && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') { setShowCapital(false); setEditingCapitalId(null); } }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-slate-800 text-sm">{editingCapitalId ? 'Edit' : 'Add'} Capital Entry</h3>
             <button onClick={() => { setShowCapital(false); setEditingCapitalId(null); }} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
@@ -489,11 +493,16 @@ export default function Capital() {
             </div>
           </div>
         </div>
+        </div>
       )}
 
-      {/* Loan Payment Modal */}
+      {/* Loan Payment Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showLoanPayment && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowLoanPayment(false); }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-slate-800 text-sm">Loan Payment</h3>
             <button onClick={() => setShowLoanPayment(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
@@ -516,11 +525,16 @@ export default function Capital() {
             <button onClick={handleLoanPayment} className="w-full bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded text-sm font-medium">Pay Loan</button>
           </div>
         </div>
+        </div>
       )}
 
-      {/* Add New Loan Modal */}
+      {/* Add New Loan Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showAddLoan && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowAddLoan(false); }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-slate-800 text-sm">Add New Loan</h3>
             <button onClick={() => setShowAddLoan(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
@@ -538,6 +552,7 @@ export default function Capital() {
             <input type="text" value={newLoanForm.notes} onChange={(e) => setNewLoanForm({ ...newLoanForm, notes: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddLoan(); }}} placeholder="Notes (optional)" className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
             <button onClick={handleAddLoan} className="w-full bg-blue-600 hover:bg-blue-700 text-white py-1.5 rounded text-sm font-medium">Add Loan</button>
           </div>
+        </div>
         </div>
       )}
 
@@ -569,9 +584,13 @@ export default function Capital() {
         </div>
       )}
 
-      {/* Historical Profit Modal */}
+      {/* Historical Profit Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showHistorical && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') { setShowHistorical(false); setEditingHistoricalId(null); } }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-slate-800 text-sm">{editingHistoricalId ? 'Edit' : 'Add'} Historical Profit</h3>
             <button onClick={() => { setShowHistorical(false); setEditingHistoricalId(null); }} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
@@ -592,6 +611,7 @@ export default function Capital() {
             <input type="text" value={historicalForm.notes} onChange={(e) => setHistoricalForm({ ...historicalForm, notes: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (editingHistoricalId ? handleUpdateHistorical : handleSaveHistorical)(); }}} placeholder="Notes (optional)" className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm" />
             <button onClick={editingHistoricalId ? handleUpdateHistorical : handleSaveHistorical} className="w-full bg-purple-600 hover:bg-purple-700 text-white py-1.5 rounded text-sm font-medium">{editingHistoricalId ? 'Update' : 'Save'}</button>
           </div>
+        </div>
         </div>
       )}
 

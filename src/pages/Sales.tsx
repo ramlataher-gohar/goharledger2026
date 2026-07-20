@@ -102,6 +102,12 @@ export default function Sales() {
   const [quickSupplier, setQuickSupplier] = useState({ name: '', phone: '', balance: '' });
   const [showQuickAddCostSupplier, setShowQuickAddCostSupplier] = useState(false);
   const [quickCostSupplier, setQuickCostSupplier] = useState({ name: '', phone: '' });
+  // Which Bulk Entry row has its quick-add mini-form open (null = none) - only
+  // one at a time, but it always shows inline in the row that opened it,
+  // not in one shared spot you'd have to go looking for.
+  const [bulkQuickAddCustomerRow, setBulkQuickAddCustomerRow] = useState<number | null>(null);
+  const [bulkQuickAddSupplierRow, setBulkQuickAddSupplierRow] = useState<number | null>(null);
+  const [bulkQuickAddCostSupplierRow, setBulkQuickAddCostSupplierRow] = useState<number | null>(null);
   const [refundingSale, setRefundingSale] = useState<Transaction | null>(null);
   const [refundForm, setRefundForm] = useState({ amount: '', costPrice: '', profit: '', mode: 'cash', date: todayStr() });
   const [showDepositAdvance, setShowDepositAdvance] = useState(false);
@@ -180,6 +186,94 @@ export default function Sales() {
       setForm((f) => ({ ...f, supplierId: data.id }));
       setShowQuickAddSupplier(false);
       setQuickSupplier({ name: '', phone: '', balance: '' });
+    }
+  }
+
+  // Same as the quick-adds above, but for one specific Bulk Entry row instead
+  // of the single Add/Edit form - the new customer/supplier still becomes
+  // available to every other row's dropdown right away too.
+  async function handleBulkQuickAddCustomer(rowIndex: number) {
+    const name = quickCustomer.name.trim();
+    if (!name) return;
+    if (customers.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+      alert('A customer with this name already exists.');
+      return;
+    }
+    const { data } = await supabase.from('customers').insert({
+      name,
+      phone: quickCustomer.phone || null,
+      credit_limit: parseFloat(quickCustomer.creditLimit || '0'),
+    }).select().single();
+    if (data) {
+      setCustomers((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      setBulkForms((prev) => {
+        const next = [...prev];
+        next[rowIndex] = { ...next[rowIndex], customerId: data.id };
+        return next;
+      });
+      setBulkQuickAddCustomerRow(null);
+      setQuickCustomer({ name: '', phone: '', creditLimit: '' });
+    }
+  }
+
+  async function handleBulkQuickAddSupplier(rowIndex: number) {
+    const name = quickSupplier.name.trim();
+    if (!name) return;
+    if (suppliers.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+      alert('A supplier with this name already exists.');
+      return;
+    }
+    const openingBalance = parseFloat(quickSupplier.balance || '0');
+    const { data } = await supabase.from('suppliers').insert({
+      name,
+      phone: quickSupplier.phone || null,
+      balance: openingBalance,
+    }).select().single();
+    if (data) {
+      if (openingBalance !== 0) {
+        await supabase.from('transactions').insert({
+          transaction_id: `OPN-BAL-${data.id}`,
+          date: todayStr(),
+          type: 'supplier_invoice',
+          primary_mode: null,
+          amount: openingBalance,
+          supplier_id: data.id,
+          description: `Opening balance - ${data.name}`,
+          created_by: user?.username || null,
+        });
+      }
+      setSuppliers((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      setBulkForms((prev) => {
+        const next = [...prev];
+        next[rowIndex] = { ...next[rowIndex], supplierId: data.id };
+        return next;
+      });
+      setBulkQuickAddSupplierRow(null);
+      setQuickSupplier({ name: '', phone: '', balance: '' });
+    }
+  }
+
+  async function handleBulkQuickAddCostSupplier(rowIndex: number) {
+    const name = quickCostSupplier.name.trim();
+    if (!name) return;
+    if (suppliers.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+      alert('A supplier with this name already exists.');
+      return;
+    }
+    const { data } = await supabase.from('suppliers').insert({
+      name,
+      phone: quickCostSupplier.phone || null,
+      balance: 0,
+    }).select().single();
+    if (data) {
+      setSuppliers((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      setBulkForms((prev) => {
+        const next = [...prev];
+        next[rowIndex] = { ...next[rowIndex], costSupplierId: data.id };
+        return next;
+      });
+      setBulkQuickAddCostSupplierRow(null);
+      setQuickCostSupplier({ name: '', phone: '' });
     }
   }
 
@@ -998,6 +1092,21 @@ export default function Sales() {
                   onCancel={() => {}}
                   saveLabel=""
                   hideActions
+                  showQuickAddCustomer={bulkQuickAddCustomerRow === i}
+                  setShowQuickAddCustomer={(v) => setBulkQuickAddCustomerRow(v ? i : null)}
+                  quickCustomer={quickCustomer}
+                  setQuickCustomer={setQuickCustomer}
+                  onQuickAddCustomer={() => handleBulkQuickAddCustomer(i)}
+                  showQuickAddSupplier={bulkQuickAddSupplierRow === i}
+                  setShowQuickAddSupplier={(v) => setBulkQuickAddSupplierRow(v ? i : null)}
+                  quickSupplier={quickSupplier}
+                  setQuickSupplier={setQuickSupplier}
+                  onQuickAddSupplier={() => handleBulkQuickAddSupplier(i)}
+                  showQuickAddCostSupplier={bulkQuickAddCostSupplierRow === i}
+                  setShowQuickAddCostSupplier={(v) => setBulkQuickAddCostSupplierRow(v ? i : null)}
+                  quickCostSupplier={quickCostSupplier}
+                  setQuickCostSupplier={setQuickCostSupplier}
+                  onQuickAddCostSupplier={() => handleBulkQuickAddCostSupplier(i)}
                   onKeyDown={(e) => {
                     // Reaches here only once focus is on this row's very
                     // last box and Enter is pressed - move on to a new row.

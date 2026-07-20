@@ -452,9 +452,13 @@ export default function Partners() {
         </div>
       )}
 
-      {/* Draw Modal */}
+      {/* Draw Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showDraw && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowDraw(false); }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-slate-800">Take Money from Shop</h3>
             <button onClick={() => setShowDraw(false)} className="p-1 hover:bg-slate-100 rounded"><X size={18} /></button>
@@ -472,11 +476,16 @@ export default function Partners() {
             </div>
           </div>
         </div>
+        </div>
       )}
 
-      {/* Return Modal */}
+      {/* Return Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showReturn && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowReturn(false); }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-slate-800">Return Money to Shop</h3>
             <button onClick={() => setShowReturn(false)} className="p-1 hover:bg-slate-100 rounded"><X size={18} /></button>
@@ -494,11 +503,16 @@ export default function Partners() {
             </div>
           </div>
         </div>
+        </div>
       )}
 
-      {/* Mark Taken Modal */}
+      {/* Mark Taken Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showMarkTaken && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowMarkTaken(null); }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-slate-800">Mark {showMarkTaken.type === 'profit' ? 'Profit Share' : 'Home Expense'} as Taken</h3>
             <button onClick={() => setShowMarkTaken(null)} className="p-1 hover:bg-slate-100 rounded"><X size={18} /></button>
@@ -515,6 +529,7 @@ export default function Partners() {
               <button onClick={() => setShowMarkTaken(null)} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm">Cancel</button>
             </div>
           </div>
+        </div>
         </div>
       )}
 

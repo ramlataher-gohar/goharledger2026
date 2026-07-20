@@ -380,9 +380,13 @@ export default function Suppliers() {
         />
       </div>
 
-      {/* Add/Edit Supplier Modal */}
+      {/* Add/Edit Supplier Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showAdd && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') { setShowAdd(false); setEditingId(null); } }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-slate-800 text-sm">{editingId ? 'Edit' : 'Add'} Supplier</h3>
             <button onClick={() => { setShowAdd(false); setEditingId(null); }} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
@@ -428,6 +432,7 @@ export default function Suppliers() {
               <button onClick={() => { setShowAdd(false); setEditingId(null); }} className="text-slate-500 hover:text-slate-700 text-sm">Cancel</button>
             </div>
           </div>
+        </div>
         </div>
       )}
 

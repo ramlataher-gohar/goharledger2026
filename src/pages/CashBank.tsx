@@ -287,9 +287,13 @@ export default function CashBank() {
         </button>
       </div>
 
-      {/* Opening Balance Modal */}
+      {/* Opening Balance Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showOpeningBalance && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowOpeningBalance(false); }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-slate-800">Set Opening Balance</h3>
             <button onClick={() => setShowOpeningBalance(false)} className="p-1 hover:bg-slate-100 rounded">
@@ -337,11 +341,16 @@ export default function CashBank() {
             </div>
           </div>
         </div>
+        </div>
       )}
 
-      {/* Transfer Modal */}
+      {/* Transfer Modal - a real popup, so it's visible no matter how far down the page you've scrolled */}
       {showTransfer && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6">
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowTransfer(false); }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-slate-800">Fund Transfer</h3>
             <button onClick={() => setShowTransfer(false)} className="p-1 hover:bg-slate-100 rounded">
@@ -388,6 +397,7 @@ export default function CashBank() {
               </button>
             </div>
           </div>
+        </div>
         </div>
       )}
 
