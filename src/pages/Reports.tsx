@@ -13,6 +13,7 @@ import { supabase } from '../utils/supabase';
 import { formatKES, formatDate, getMonthLabel, saleProfit, isSaleIncomplete } from '../utils/format';
 import { sortCustomersByBalance, sortSuppliersByBalance } from '../utils/sortEntities';
 import { useDataRefresh } from '../context/DataContext';
+import { usePersistentState } from '../context/PageStateContext';
 import DateFilterBar from '../components/DateFilterBar';
 import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
 import type { Transaction, Customer, Supplier, ExpenseCategory } from '../types';
@@ -64,14 +65,14 @@ const entityTypes = [
 
 export default function Reports() {
   const { refreshKey } = useDataRefresh();
-  const [filters, setFilters] = useState<ReportFilters>(emptyFilters);
+  const [filters, setFilters] = usePersistentState<ReportFilters>('reports.filters', emptyFilters);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [splits, setSplits] = useState<{ transaction_id: string; mode: string; amount: number }[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showFilters, setShowFilters] = useState(true);
+  const [showFilters, setShowFilters] = usePersistentState('reports.showFilters', true);
   const [monthlyProfit, setMonthlyProfit] = useState<any[]>([]);
   const [physicalCounts, setPhysicalCounts] = useState<{ id: string; month: string; mpesa_actual: number; cash_actual: number; paybill_actual: number; mpesa_system: number; cash_system: number; paybill_system: number }[]>([]);
   const [editingCountId, setEditingCountId] = useState<string | null>(null);

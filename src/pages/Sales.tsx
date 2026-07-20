@@ -22,6 +22,7 @@ import { adjustCustomerCredit, adjustCustomerAdvance, adjustSupplierBalance } fr
 import { syncCommissionExpense, voidCommissionExpense } from '../utils/commissionExpense';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
+import { usePersistentState } from '../context/PageStateContext';
 import LedgerModal from '../components/LedgerModal';
 import DateFilterBar from '../components/DateFilterBar';
 import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
@@ -82,19 +83,19 @@ export default function Sales() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [showBulk, setShowBulk] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = usePersistentState('sales.showAdd', false);
+  const [showBulk, setShowBulk] = usePersistentState('sales.showBulk', false);
+  const [editingId, setEditingId] = usePersistentState<string | null>('sales.editingId', null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<SaleForm>(emptyForm);
-  const [bulkForms, setBulkForms] = useState<SaleForm[]>(Array.from({ length: 10 }, () => ({ ...emptyForm })));
-  const [search, setSearch] = useState('');
-  const [filterMode, setFilterMode] = useState<string>('');
-  const [datePreset, setDatePreset] = useState<DatePreset>('month');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
-  const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
-  const [highlightedSaleId, setHighlightedSaleId] = useState<string | null>(null);
+  const [form, setForm] = usePersistentState<SaleForm>('sales.form', emptyForm);
+  const [bulkForms, setBulkForms] = usePersistentState<SaleForm[]>('sales.bulkForms', () => Array.from({ length: 10 }, () => ({ ...emptyForm })));
+  const [search, setSearch] = usePersistentState('sales.search', '');
+  const [filterMode, setFilterMode] = usePersistentState<string>('sales.filterMode', '');
+  const [datePreset, setDatePreset] = usePersistentState<DatePreset>('sales.datePreset', 'month');
+  const [customFrom, setCustomFrom] = usePersistentState('sales.customFrom', '');
+  const [customTo, setCustomTo] = usePersistentState('sales.customTo', '');
+  const [expandedDates, setExpandedDates] = usePersistentState<Set<string>>('sales.expandedDates', () => new Set());
+  const [highlightedSaleId, setHighlightedSaleId] = usePersistentState<string | null>('sales.highlightedSaleId', null);
   const [showLedger, setShowLedger] = useState(false);
   const [showQuickAddCustomer, setShowQuickAddCustomer] = useState(false);
   const [showQuickAddSupplier, setShowQuickAddSupplier] = useState(false);
@@ -108,10 +109,10 @@ export default function Sales() {
   const [bulkQuickAddCustomerRow, setBulkQuickAddCustomerRow] = useState<number | null>(null);
   const [bulkQuickAddSupplierRow, setBulkQuickAddSupplierRow] = useState<number | null>(null);
   const [bulkQuickAddCostSupplierRow, setBulkQuickAddCostSupplierRow] = useState<number | null>(null);
-  const [refundingSale, setRefundingSale] = useState<Transaction | null>(null);
-  const [refundForm, setRefundForm] = useState({ amount: '', costPrice: '', profit: '', mode: 'cash', date: todayStr() });
-  const [showDepositAdvance, setShowDepositAdvance] = useState(false);
-  const [advanceDepositForm, setAdvanceDepositForm] = useState({ customerId: '', amount: '', date: todayStr(), mode: 'cash', notes: '' });
+  const [refundingSale, setRefundingSale] = usePersistentState<Transaction | null>('sales.refundingSale', null);
+  const [refundForm, setRefundForm] = usePersistentState('sales.refundForm', { amount: '', costPrice: '', profit: '', mode: 'cash', date: todayStr() });
+  const [showDepositAdvance, setShowDepositAdvance] = usePersistentState('sales.showDepositAdvance', false);
+  const [advanceDepositForm, setAdvanceDepositForm] = usePersistentState('sales.advanceDepositForm', { customerId: '', amount: '', date: todayStr(), mode: 'cash', notes: '' });
 
   useEffect(() => {
     fetchData();

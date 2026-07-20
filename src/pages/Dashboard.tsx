@@ -27,6 +27,7 @@ import { supabase } from '../utils/supabase';
 import { formatKES, formatDate, saleProfit, todayStr, thisMonthStr } from '../utils/format';
 import { sortCustomersByBalance, sortSuppliersByBalance } from '../utils/sortEntities';
 import { useDataRefresh } from '../context/DataContext';
+import { usePersistentState } from '../context/PageStateContext';
 import DateFilterBar from '../components/DateFilterBar';
 import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
 import { fetchAllRows } from '../utils/fetchAll';
@@ -63,18 +64,18 @@ export default function Dashboard() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [monthFilter, setMonthFilter] = useState(thisMonthStr());
+  const [monthFilter, setMonthFilter] = usePersistentState('dashboard.monthFilter', thisMonthStr());
   const [monthlyBalances, setMonthlyBalances] = useState<{ id: string; month: string; mpesa: number; cash: number; paybill: number }[]>([]);
   const [computedForwardedBalance, setComputedForwardedBalance] = useState({ mpesa: 0, cash: 0, bank: 0 });
-  const [showForwardedBalance, setShowForwardedBalance] = useState(false);
-  const [forwardedBalanceForm, setForwardedBalanceForm] = useState({ mpesa: '', cash: '', paybill: '' });
+  const [showForwardedBalance, setShowForwardedBalance] = usePersistentState('dashboard.showForwardedBalance', false);
+  const [forwardedBalanceForm, setForwardedBalanceForm] = usePersistentState('dashboard.forwardedBalanceForm', { mpesa: '', cash: '', paybill: '' });
   const [physicalCounts, setPhysicalCounts] = useState<{ id: string; month: string; mpesa_actual: number; cash_actual: number; paybill_actual: number; mpesa_system: number; cash_system: number; paybill_system: number }[]>([]);
-  const [showPhysicalCount, setShowPhysicalCount] = useState(false);
-  const [physicalCountForm, setPhysicalCountForm] = useState({ mpesa: '', cash: '', paybill: '' });
-  const [showReminderModal, setShowReminderModal] = useState(false);
-  const [showAlerts, setShowAlerts] = useState(true);
-  const [editingReminder, setEditingReminder] = useState<string | null>(null);
-  const [reminderForm, setReminderForm] = useState({
+  const [showPhysicalCount, setShowPhysicalCount] = usePersistentState('dashboard.showPhysicalCount', false);
+  const [physicalCountForm, setPhysicalCountForm] = usePersistentState('dashboard.physicalCountForm', { mpesa: '', cash: '', paybill: '' });
+  const [showReminderModal, setShowReminderModal] = usePersistentState('dashboard.showReminderModal', false);
+  const [showAlerts, setShowAlerts] = usePersistentState('dashboard.showAlerts', true);
+  const [editingReminder, setEditingReminder] = usePersistentState<string | null>('dashboard.editingReminder', null);
+  const [reminderForm, setReminderForm] = usePersistentState('dashboard.reminderForm', {
     entityType: 'supplier' as 'supplier' | 'customer',
     entityId: '',
     amount: '',
@@ -85,16 +86,16 @@ export default function Dashboard() {
   });
 
   // Daily sales with date filter
-  const [dailySalesPreset, setDailySalesPreset] = useState<DatePreset>('today');
-  const [dailySalesCustomFrom, setDailySalesCustomFrom] = useState('');
-  const [dailySalesCustomTo, setDailySalesCustomTo] = useState('');
+  const [dailySalesPreset, setDailySalesPreset] = usePersistentState<DatePreset>('dashboard.dailySalesPreset', 'today');
+  const [dailySalesCustomFrom, setDailySalesCustomFrom] = usePersistentState('dashboard.dailySalesCustomFrom', '');
+  const [dailySalesCustomTo, setDailySalesCustomTo] = usePersistentState('dashboard.dailySalesCustomTo', '');
   const { from: dailySalesFrom, to: dailySalesTo } = getDatePresetRange(dailySalesPreset, dailySalesCustomFrom, dailySalesCustomTo);
   const [dailySalesBreakdown, setDailySalesBreakdown] = useState<DailySalesBreakdown | null>(null);
 
   // Monthly capital filter
-  const [capitalPreset, setCapitalPreset] = useState<DatePreset>('month');
-  const [capitalCustomFrom, setCapitalCustomFrom] = useState('');
-  const [capitalCustomTo, setCapitalCustomTo] = useState('');
+  const [capitalPreset, setCapitalPreset] = usePersistentState<DatePreset>('dashboard.capitalPreset', 'month');
+  const [capitalCustomFrom, setCapitalCustomFrom] = usePersistentState('dashboard.capitalCustomFrom', '');
+  const [capitalCustomTo, setCapitalCustomTo] = usePersistentState('dashboard.capitalCustomTo', '');
   const { from: capitalFrom, to: capitalTo } = getDatePresetRange(capitalPreset, capitalCustomFrom, capitalCustomTo);
   const [monthlyCapital, setMonthlyCapital] = useState<MonthlyCapital | null>(null);
 

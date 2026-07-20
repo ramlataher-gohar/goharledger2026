@@ -16,6 +16,8 @@ import { insertTransactionWithId } from '../utils/transactionId';
 import { fetchAllRows } from '../utils/fetchAll';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
+import { usePersistentState } from '../context/PageStateContext';
+import { handleFormKeyNav } from '../utils/formKeyNav';
 import LedgerModal from '../components/LedgerModal';
 import DateFilterBar from '../components/DateFilterBar';
 import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
@@ -103,23 +105,23 @@ export default function Suppliers() {
   const { user } = useAuth();
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
+  const [selectedSupplier, setSelectedSupplier] = usePersistentState<Supplier | null>('suppliers.selectedSupplier', null);
   const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [showInvoice, setShowInvoice] = useState(false);
-  const [showPayment, setShowPayment] = useState(false);
-  const [form, setForm] = useState<SupplierForm>(emptySupplier);
-  const [invoiceForm, setInvoiceForm] = useState<InvoiceForm>(emptyInvoice);
-  const [paymentForm, setPaymentForm] = useState<PaymentForm>(emptyPayment);
-  const [search, setSearch] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = usePersistentState('suppliers.showAdd', false);
+  const [showInvoice, setShowInvoice] = usePersistentState('suppliers.showInvoice', false);
+  const [showPayment, setShowPayment] = usePersistentState('suppliers.showPayment', false);
+  const [form, setForm] = usePersistentState<SupplierForm>('suppliers.form', emptySupplier);
+  const [invoiceForm, setInvoiceForm] = usePersistentState<InvoiceForm>('suppliers.invoiceForm', emptyInvoice);
+  const [paymentForm, setPaymentForm] = usePersistentState<PaymentForm>('suppliers.paymentForm', emptyPayment);
+  const [search, setSearch] = usePersistentState('suppliers.search', '');
+  const [editingId, setEditingId] = usePersistentState<string | null>('suppliers.editingId', null);
   const [showLedger, setShowLedger] = useState(false);
-  const [showBulkPayment, setShowBulkPayment] = useState(false);
-  const [bulkPaymentForms, setBulkPaymentForms] = useState<BulkPaymentRow[]>(Array.from({ length: 10 }, () => ({ ...emptyBulkPaymentRow })));
+  const [showBulkPayment, setShowBulkPayment] = usePersistentState('suppliers.showBulkPayment', false);
+  const [bulkPaymentForms, setBulkPaymentForms] = usePersistentState<BulkPaymentRow[]>('suppliers.bulkPaymentForms', () => Array.from({ length: 10 }, () => ({ ...emptyBulkPaymentRow })));
   const [bulkPaymentSaving, setBulkPaymentSaving] = useState(false);
-  const [txnDatePreset, setTxnDatePreset] = useState<DatePreset>('month');
-  const [txnCustomFrom, setTxnCustomFrom] = useState('');
-  const [txnCustomTo, setTxnCustomTo] = useState('');
+  const [txnDatePreset, setTxnDatePreset] = usePersistentState<DatePreset>('suppliers.txnDatePreset', 'month');
+  const [txnCustomFrom, setTxnCustomFrom] = usePersistentState('suppliers.txnCustomFrom', '');
+  const [txnCustomTo, setTxnCustomTo] = usePersistentState('suppliers.txnCustomTo', '');
 
   useEffect(() => {
     fetchData();
@@ -423,6 +425,10 @@ export default function Suppliers() {
     (s.phone || '').includes(search)
   ));
 
+  function addBulkPaymentRow() {
+    setBulkPaymentForms([...bulkPaymentForms, { ...emptyBulkPaymentRow, date: bulkPaymentForms[0]?.date || todayStr() }]);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -464,7 +470,7 @@ export default function Suppliers() {
           className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
           onKeyDown={(e) => { if (e.key === 'Escape') { setShowAdd(false); setEditingId(null); } }}
         >
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto" data-form-nav>
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-slate-800 text-sm">{editingId ? 'Edit' : 'Add'} Supplier</h3>
             <button onClick={() => { setShowAdd(false); setEditingId(null); }} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
@@ -475,6 +481,7 @@ export default function Suppliers() {
                 type="text"
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 placeholder="Name"
                 className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
@@ -482,6 +489,7 @@ export default function Suppliers() {
                 type="text"
                 value={form.phone}
                 onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 placeholder="Phone"
                 className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
@@ -490,6 +498,7 @@ export default function Suppliers() {
               type="number"
               value={form.openingBalance}
               onChange={(e) => setForm({ ...form, openingBalance: e.target.value })}
+              onKeyDown={(e) => handleFormKeyNav(e)}
               placeholder="Opening Balance (amount owed)"
               className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
             />
@@ -497,12 +506,12 @@ export default function Suppliers() {
               type="text"
               value={form.notes}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSaveSupplier(); }}}
+              onKeyDown={(e) => handleFormKeyNav(e, handleSaveSupplier)}
               placeholder="Notes (optional)"
               className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
             />
             <div className="flex items-center gap-2">
-              <input type="checkbox" id="dualParty" checked={form.isDualParty} onChange={(e) => setForm({ ...form, isDualParty: e.target.checked })} className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
+              <input type="checkbox" id="dualParty" checked={form.isDualParty} onChange={(e) => setForm({ ...form, isDualParty: e.target.checked })} onKeyDown={(e) => handleFormKeyNav(e)} className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
               <label htmlFor="dualParty" className="text-xs text-slate-600">Also a customer (dual-party)</label>
             </div>
             <div className="flex gap-2 pt-2 border-t border-slate-200">
@@ -521,7 +530,7 @@ export default function Suppliers() {
           className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
           onKeyDown={(e) => { if (e.key === 'Escape') setShowBulkPayment(false); }}
         >
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-3xl max-h-[90vh] overflow-y-auto" data-form-nav>
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-slate-800 text-sm">Bulk Payments to Suppliers</h3>
             <button onClick={() => setShowBulkPayment(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
@@ -548,6 +557,7 @@ export default function Suppliers() {
                       newForms[i] = { ...newForms[i], supplierId: e.target.value };
                       setBulkPaymentForms(newForms);
                     }}
+                    onKeyDown={(e) => handleFormKeyNav(e, addBulkPaymentRow)}
                     className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
                     <option value="">Supplier</option>
@@ -561,6 +571,7 @@ export default function Suppliers() {
                       newForms[i] = { ...newForms[i], amount: e.target.value };
                       setBulkPaymentForms(newForms);
                     }}
+                    onKeyDown={(e) => handleFormKeyNav(e, addBulkPaymentRow)}
                     placeholder="Amount"
                     className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
@@ -579,6 +590,7 @@ export default function Suppliers() {
                       }
                       setBulkPaymentForms(newForms);
                     }}
+                    onKeyDown={(e) => handleFormKeyNav(e, addBulkPaymentRow)}
                     className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                   <select
@@ -588,6 +600,7 @@ export default function Suppliers() {
                       newForms[i] = { ...newForms[i], mode: e.target.value };
                       setBulkPaymentForms(newForms);
                     }}
+                    onKeyDown={(e) => handleFormKeyNav(e, addBulkPaymentRow)}
                     className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
                     <option value="cash">Cash</option>
@@ -603,12 +616,7 @@ export default function Suppliers() {
                     newForms[i] = { ...newForms[i], notes: e.target.value };
                     setBulkPaymentForms(newForms);
                   }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !f.isPostDated && i === bulkPaymentForms.length - 1) {
-                      e.preventDefault();
-                      setBulkPaymentForms([...bulkPaymentForms, { ...emptyBulkPaymentRow, date: bulkPaymentForms[0]?.date || todayStr() }]);
-                    }
-                  }}
+                  onKeyDown={(e) => handleFormKeyNav(e, addBulkPaymentRow)}
                   placeholder="Notes (optional)"
                   className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none mb-2"
                 />
@@ -623,6 +631,7 @@ export default function Suppliers() {
                       newForms[i] = { ...newForms[i], transactionFee: e.target.value };
                       setBulkPaymentForms(newForms);
                     }}
+                    onKeyDown={(e) => handleFormKeyNav(e, addBulkPaymentRow)}
                     placeholder="Transaction fee (optional)"
                     className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none mb-2"
                   />
@@ -639,6 +648,7 @@ export default function Suppliers() {
                         newForms[i] = { ...newForms[i], isPostDated: e.target.checked };
                         setBulkPaymentForms(newForms);
                       }}
+                      onKeyDown={(e) => handleFormKeyNav(e, addBulkPaymentRow)}
                       className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                     />
                     <label className="text-xs text-slate-600">Post-dated cheque</label>
@@ -651,12 +661,7 @@ export default function Suppliers() {
                           newForms[i] = { ...newForms[i], clearsOn: e.target.value };
                           setBulkPaymentForms(newForms);
                         }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && i === bulkPaymentForms.length - 1) {
-                            e.preventDefault();
-                            setBulkPaymentForms([...bulkPaymentForms, { ...emptyBulkPaymentRow, date: bulkPaymentForms[0]?.date || todayStr() }]);
-                          }
-                        }}
+                        onKeyDown={(e) => handleFormKeyNav(e, addBulkPaymentRow)}
                         className="flex-1 border border-slate-300 rounded px-2 py-1 text-xs"
                         placeholder="Clears on"
                       />
@@ -668,7 +673,7 @@ export default function Suppliers() {
           </div>
           <div className="flex gap-3 mt-3 pt-3 border-t border-slate-200">
             <button
-              onClick={() => setBulkPaymentForms([...bulkPaymentForms, { ...emptyBulkPaymentRow, date: bulkPaymentForms[0]?.date || todayStr() }])}
+              onClick={addBulkPaymentRow}
               className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-1.5 rounded text-sm font-medium flex items-center gap-1"
             >
               <Plus size={14} /> Add Row
@@ -846,8 +851,8 @@ export default function Suppliers() {
 
       {/* Invoice Modal */}
       {showInvoice && selectedSupplier && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-lg p-4 w-full max-w-md">
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onKeyDown={(e) => { if (e.key === 'Escape') setShowInvoice(false); }}>
+          <div className="bg-white rounded-xl shadow-lg p-4 w-full max-w-md" data-form-nav>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-slate-800 text-sm">Invoice - {selectedSupplier.name}</h3>
               <button onClick={() => setShowInvoice(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
@@ -858,12 +863,14 @@ export default function Suppliers() {
                   type="date"
                   value={invoiceForm.date}
                   onChange={(e) => setInvoiceForm({ ...invoiceForm, date: e.target.value })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
                 <input
                   type="number"
                   value={invoiceForm.amount}
                   onChange={(e) => setInvoiceForm({ ...invoiceForm, amount: e.target.value })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   placeholder="Amount"
                   className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
@@ -872,6 +879,7 @@ export default function Suppliers() {
                 type="date"
                 value={invoiceForm.dueDate}
                 onChange={(e) => setInvoiceForm({ ...invoiceForm, dueDate: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 placeholder="Due Date"
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
@@ -879,6 +887,7 @@ export default function Suppliers() {
                 type="text"
                 value={invoiceForm.notes}
                 onChange={(e) => setInvoiceForm({ ...invoiceForm, notes: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 placeholder="Notes (optional)"
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
@@ -888,6 +897,7 @@ export default function Suppliers() {
                   id="setReminder"
                   checked={invoiceForm.setReminder}
                   onChange={(e) => setInvoiceForm({ ...invoiceForm, setReminder: e.target.checked })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                 />
                 <label htmlFor="setReminder" className="text-xs text-slate-600">Set reminder</label>
@@ -896,6 +906,7 @@ export default function Suppliers() {
                     type="date"
                     value={invoiceForm.reminderDate}
                     onChange={(e) => setInvoiceForm({ ...invoiceForm, reminderDate: e.target.value })}
+                    onKeyDown={(e) => handleFormKeyNav(e, handleAddInvoice)}
                     className="flex-1 border border-slate-300 rounded px-2 py-1 text-xs"
                     placeholder="Reminder date"
                   />
@@ -909,8 +920,8 @@ export default function Suppliers() {
 
       {/* Payment Modal */}
       {showPayment && selectedSupplier && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-lg p-4 w-full max-w-md">
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onKeyDown={(e) => { if (e.key === 'Escape') setShowPayment(false); }}>
+          <div className="bg-white rounded-xl shadow-lg p-4 w-full max-w-md" data-form-nav>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-semibold text-slate-800 text-sm">Pay - {selectedSupplier.name}</h3>
               <button onClick={() => setShowPayment(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
@@ -921,6 +932,7 @@ export default function Suppliers() {
                   type="number"
                   value={paymentForm.amount}
                   onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   placeholder="Amount"
                   className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
@@ -928,11 +940,13 @@ export default function Suppliers() {
                   type="date"
                   value={paymentForm.date}
                   onChange={(e) => setPaymentForm({ ...paymentForm, date: e.target.value })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
                 <select
                   value={paymentForm.mode}
                   onChange={(e) => setPaymentForm({ ...paymentForm, mode: e.target.value })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 >
                   <option value="cash">Cash</option>
@@ -945,6 +959,7 @@ export default function Suppliers() {
                   type="number"
                   value={paymentForm.transactionFee}
                   onChange={(e) => setPaymentForm({ ...paymentForm, transactionFee: e.target.value })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   placeholder="Transaction fee (optional)"
                   className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
@@ -956,6 +971,7 @@ export default function Suppliers() {
                     id="paymentPostDated"
                     checked={paymentForm.isPostDated}
                     onChange={(e) => setPaymentForm({ ...paymentForm, isPostDated: e.target.checked })}
+                    onKeyDown={(e) => handleFormKeyNav(e)}
                     className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                   />
                   <label htmlFor="paymentPostDated" className="text-xs text-slate-600">Post-dated cheque</label>
@@ -964,6 +980,7 @@ export default function Suppliers() {
                       type="date"
                       value={paymentForm.clearsOn}
                       onChange={(e) => setPaymentForm({ ...paymentForm, clearsOn: e.target.value })}
+                      onKeyDown={(e) => handleFormKeyNav(e)}
                       className="flex-1 border border-slate-300 rounded px-2 py-1 text-xs"
                       placeholder="Clears on"
                     />
@@ -974,7 +991,7 @@ export default function Suppliers() {
                 type="text"
                 value={paymentForm.notes}
                 onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handlePayment(); }}}
+                onKeyDown={(e) => handleFormKeyNav(e, handlePayment)}
                 placeholder="Notes (optional)"
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />

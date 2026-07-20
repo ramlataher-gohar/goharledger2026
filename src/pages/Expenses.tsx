@@ -18,6 +18,8 @@ import { insertTransactionWithId } from '../utils/transactionId';
 import { fetchAllRows } from '../utils/fetchAll';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
+import { usePersistentState } from '../context/PageStateContext';
+import { handleFormKeyNav } from '../utils/formKeyNav';
 import LedgerModal from '../components/LedgerModal';
 import DateFilterBar from '../components/DateFilterBar';
 import { getDatePresetRange, DatePreset } from '../utils/dateFilters';
@@ -85,27 +87,27 @@ const emptyBulkRow: BulkExpenseRow = {
 export default function Expenses() {
   const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'shop' | 'home' | 'partners' | 'loans' | 'suppliers'>('shop');
+  const [activeTab, setActiveTab] = usePersistentState<'shop' | 'home' | 'partners' | 'loans' | 'suppliers'>('expenses.activeTab', 'shop');
   const [expenses, setExpenses] = useState<Transaction[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loans, setLoans] = useState<LoanTracker[]>([]);
   const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<ExpenseForm>(emptyForm);
-  const [search, setSearch] = useState('');
-  const [filterCategory, setFilterCategory] = useState('');
-  const [datePreset, setDatePreset] = useState<DatePreset>('month');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
-  const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
+  const [showAdd, setShowAdd] = usePersistentState('expenses.showAdd', false);
+  const [editingId, setEditingId] = usePersistentState<string | null>('expenses.editingId', null);
+  const [form, setForm] = usePersistentState<ExpenseForm>('expenses.form', emptyForm);
+  const [search, setSearch] = usePersistentState('expenses.search', '');
+  const [filterCategory, setFilterCategory] = usePersistentState('expenses.filterCategory', '');
+  const [datePreset, setDatePreset] = usePersistentState<DatePreset>('expenses.datePreset', 'month');
+  const [customFrom, setCustomFrom] = usePersistentState('expenses.customFrom', '');
+  const [customTo, setCustomTo] = usePersistentState('expenses.customTo', '');
+  const [expandedDates, setExpandedDates] = usePersistentState<Set<string>>('expenses.expandedDates', () => new Set());
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryDesc, setNewCategoryDesc] = useState('');
   const [showLedger, setShowLedger] = useState(false);
-  const [showBulk, setShowBulk] = useState(false);
-  const [bulkForms, setBulkForms] = useState<BulkExpenseRow[]>(Array.from({ length: 10 }, () => ({ ...emptyBulkRow })));
+  const [showBulk, setShowBulk] = usePersistentState('expenses.showBulk', false);
+  const [bulkForms, setBulkForms] = usePersistentState<BulkExpenseRow[]>('expenses.bulkForms', () => Array.from({ length: 10 }, () => ({ ...emptyBulkRow })));
   const [bulkSaving, setBulkSaving] = useState(false);
 
   useEffect(() => {
@@ -560,6 +562,10 @@ export default function Expenses() {
   // up anywhere. Use the dedicated "Supplier Payments" tab for those instead.
   const shopSelectableCategories = shopCategories.filter((c) => c.name !== 'stock' && c.name !== 'supplier_payment');
 
+  function addBulkRow() {
+    setBulkForms([...bulkForms, { ...emptyBulkRow, date: bulkForms[0]?.date || todayStr() }]);
+  }
+
   return (
     <div className="space-y-4">
       {/* Tabs */}
@@ -674,7 +680,7 @@ export default function Expenses() {
           className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
           onKeyDown={(e) => { if (e.key === 'Escape') { setShowAdd(false); setEditingId(null); } }}
         >
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-2xl max-h-[90vh] overflow-y-auto" data-form-nav>
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-slate-800 text-sm">
               {editingId ? 'Edit' : 'Add'} {activeTab === 'shop' ? 'Expense' : activeTab === 'home' ? 'Home Expense' : activeTab === 'partners' ? 'Partner Draw' : activeTab === 'suppliers' ? 'Supplier Payment' : 'Loan Payment'}
@@ -692,12 +698,14 @@ export default function Expenses() {
                 type="date"
                 value={form.date}
                 onChange={(e) => setForm({ ...form, date: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
               <input
                 type="number"
                 value={form.amount}
                 onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 placeholder="Amount"
                 className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
@@ -707,6 +715,7 @@ export default function Expenses() {
                 <select
                   value={form.mode}
                   onChange={(e) => setForm({ ...form, mode: e.target.value })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 >
                   <option value="cash">Cash</option>
@@ -722,6 +731,7 @@ export default function Expenses() {
                 type="number"
                 value={form.transactionFee}
                 onChange={(e) => setForm({ ...form, transactionFee: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 placeholder="Transaction fee (optional)"
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
@@ -735,6 +745,7 @@ export default function Expenses() {
                   id="isPostDated"
                   checked={form.isPostDated}
                   onChange={(e) => setForm({ ...form, isPostDated: e.target.checked })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                 />
                 <label htmlFor="isPostDated" className="text-xs text-slate-600">Post-dated cheque</label>
@@ -743,6 +754,7 @@ export default function Expenses() {
                     type="date"
                     value={form.clearsOn}
                     onChange={(e) => setForm({ ...form, clearsOn: e.target.value })}
+                    onKeyDown={(e) => handleFormKeyNav(e)}
                     className="flex-1 border border-slate-300 rounded px-2 py-1 text-xs"
                     placeholder="Clears on"
                   />
@@ -755,6 +767,7 @@ export default function Expenses() {
               <select
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               >
                 <option value="">Category</option>
@@ -767,6 +780,7 @@ export default function Expenses() {
                 <select
                   value={form.partnerId}
                   onChange={(e) => setForm({ ...form, partnerId: e.target.value })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 >
                   <option value="">Partner</option>
@@ -776,6 +790,7 @@ export default function Expenses() {
                 <select
                   value={form.source}
                   onChange={(e) => setForm({ ...form, source: e.target.value as 'shop' | 'own_pocket' })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
                   className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                 >
                   <option value="shop">From Shop</option>
@@ -788,6 +803,7 @@ export default function Expenses() {
               <select
                 value={form.partnerId}
                 onChange={(e) => setForm({ ...form, partnerId: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               >
                 <option value="">Partner</option>
@@ -800,6 +816,7 @@ export default function Expenses() {
               <select
                 value={form.loanId}
                 onChange={(e) => setForm({ ...form, loanId: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               >
                 <option value="">Select Loan</option>
@@ -811,6 +828,7 @@ export default function Expenses() {
               <select
                 value={form.supplierId}
                 onChange={(e) => setForm({ ...form, supplierId: e.target.value })}
+                onKeyDown={(e) => handleFormKeyNav(e)}
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               >
                 <option value="">Supplier</option>
@@ -823,6 +841,7 @@ export default function Expenses() {
               type="text"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
+              onKeyDown={(e) => handleFormKeyNav(e)}
               placeholder="Description (optional)"
               className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
             />
@@ -832,12 +851,7 @@ export default function Expenses() {
               type="text"
               value={form.notes}
               onChange={(e) => setForm({ ...form, notes: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  (editingId ? handleUpdate : handleSave)();
-                }
-              }}
+              onKeyDown={(e) => handleFormKeyNav(e, () => (editingId ? handleUpdate : handleSave)())}
               placeholder="Notes (optional)"
               className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
             />
@@ -869,7 +883,7 @@ export default function Expenses() {
           className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
           onKeyDown={(e) => { if (e.key === 'Escape') setShowBulk(false); }}
         >
-        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-3xl max-h-[90vh] overflow-y-auto" data-form-nav>
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-slate-800 text-sm">Bulk Entry - {activeTab === 'shop' ? 'Shop Expenses' : 'Home Expenses'}</h3>
             <button onClick={() => setShowBulk(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
@@ -902,6 +916,7 @@ export default function Expenses() {
                       }
                       setBulkForms(newForms);
                     }}
+                    onKeyDown={(e) => handleFormKeyNav(e, addBulkRow)}
                     className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                   <input
@@ -912,6 +927,7 @@ export default function Expenses() {
                       newForms[i] = { ...newForms[i], amount: e.target.value };
                       setBulkForms(newForms);
                     }}
+                    onKeyDown={(e) => handleFormKeyNav(e, addBulkRow)}
                     placeholder="Amount"
                     className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
@@ -925,6 +941,7 @@ export default function Expenses() {
                         newForms[i] = { ...newForms[i], mode: e.target.value };
                         setBulkForms(newForms);
                       }}
+                      onKeyDown={(e) => handleFormKeyNav(e, addBulkRow)}
                       className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                     >
                       <option value="cash">Cash</option>
@@ -942,6 +959,7 @@ export default function Expenses() {
                       newForms[i] = { ...newForms[i], category: e.target.value };
                       setBulkForms(newForms);
                     }}
+                    onKeyDown={(e) => handleFormKeyNav(e, addBulkRow)}
                     className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm mb-2 focus:ring-2 focus:ring-emerald-500 outline-none"
                   >
                     <option value="">Category</option>
@@ -958,6 +976,7 @@ export default function Expenses() {
                         newForms[i] = { ...newForms[i], partnerId: e.target.value };
                         setBulkForms(newForms);
                       }}
+                      onKeyDown={(e) => handleFormKeyNav(e, addBulkRow)}
                       className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                     >
                       <option value="">Partner</option>
@@ -971,6 +990,7 @@ export default function Expenses() {
                         newForms[i] = { ...newForms[i], source: e.target.value as 'shop' | 'own_pocket' };
                         setBulkForms(newForms);
                       }}
+                      onKeyDown={(e) => handleFormKeyNav(e, addBulkRow)}
                       className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                     >
                       <option value="shop">From Shop</option>
@@ -987,12 +1007,7 @@ export default function Expenses() {
                     newForms[i] = { ...newForms[i], description: e.target.value };
                     setBulkForms(newForms);
                   }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !f.isPostDated && i === bulkForms.length - 1) {
-                      e.preventDefault();
-                      setBulkForms([...bulkForms, { ...emptyBulkRow, date: bulkForms[0]?.date || todayStr() }]);
-                    }
-                  }}
+                  onKeyDown={(e) => handleFormKeyNav(e, addBulkRow)}
                   placeholder="Description (optional)"
                   className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none mb-2"
                 />
@@ -1007,6 +1022,7 @@ export default function Expenses() {
                       newForms[i] = { ...newForms[i], transactionFee: e.target.value };
                       setBulkForms(newForms);
                     }}
+                    onKeyDown={(e) => handleFormKeyNav(e, addBulkRow)}
                     placeholder="Transaction fee (optional)"
                     className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none mb-2"
                   />
@@ -1023,6 +1039,7 @@ export default function Expenses() {
                         newForms[i] = { ...newForms[i], isPostDated: e.target.checked };
                         setBulkForms(newForms);
                       }}
+                      onKeyDown={(e) => handleFormKeyNav(e, addBulkRow)}
                       className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
                     />
                     <label className="text-xs text-slate-600">Post-dated cheque</label>
@@ -1035,12 +1052,7 @@ export default function Expenses() {
                           newForms[i] = { ...newForms[i], clearsOn: e.target.value };
                           setBulkForms(newForms);
                         }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && i === bulkForms.length - 1) {
-                            e.preventDefault();
-                            setBulkForms([...bulkForms, { ...emptyBulkRow, date: bulkForms[0]?.date || todayStr() }]);
-                          }
-                        }}
+                        onKeyDown={(e) => handleFormKeyNav(e, addBulkRow)}
                         className="flex-1 border border-slate-300 rounded px-2 py-1 text-xs"
                         placeholder="Clears on"
                       />
@@ -1052,7 +1064,7 @@ export default function Expenses() {
           </div>
           <div className="flex gap-3 mt-3 pt-3 border-t border-slate-200">
             <button
-              onClick={() => setBulkForms([...bulkForms, { ...emptyBulkRow, date: bulkForms[0]?.date || todayStr() }])}
+              onClick={addBulkRow}
               className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-1.5 rounded text-sm font-medium flex items-center gap-1"
             >
               <Plus size={14} /> Add Row
