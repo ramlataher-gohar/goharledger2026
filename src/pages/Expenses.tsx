@@ -56,6 +56,26 @@ const emptyForm: ExpenseForm = {
   transactionFee: '',
 };
 
+interface BulkExpenseRow {
+  date: string;
+  amount: string;
+  mode: string;
+  category: string;
+  partnerId: string;
+  source: 'shop' | 'own_pocket';
+  description: string;
+}
+
+const emptyBulkRow: BulkExpenseRow = {
+  date: todayStr(),
+  amount: '',
+  mode: 'cash',
+  category: '',
+  partnerId: '',
+  source: 'shop',
+  description: '',
+};
+
 export default function Expenses() {
   const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
@@ -78,6 +98,9 @@ export default function Expenses() {
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newCategoryDesc, setNewCategoryDesc] = useState('');
   const [showLedger, setShowLedger] = useState(false);
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkForms, setBulkForms] = useState<BulkExpenseRow[]>(Array.from({ length: 10 }, () => ({ ...emptyBulkRow })));
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -291,6 +314,53 @@ export default function Expenses() {
     triggerRefresh();
   }
 
+  // Only used for the Shop Expenses and Home Expenses tabs - suppliers/loans/partners
+  // payments each need a picked record (loan, supplier) that doesn't fit a fast
+  // multi-row entry flow the way plain expenses do.
+  async function handleBulkSave() {
+    if (bulkSaving) return;
+    const isHomeExpense = activeTab === 'home';
+    const validForms = bulkForms
+      .map((f, originalIndex) => ({ f, originalIndex }))
+      .filter(({ f }) => f.amount && parseFloat(f.amount) > 0);
+    if (validForms.length === 0) return;
+    setBulkSaving(true);
+    try {
+      const failedRows: number[] = [];
+
+      for (let i = 0; i < validForms.length; i++) {
+        const { f, originalIndex } = validForms[i];
+        const amt = parseFloat(f.amount);
+        const category = isHomeExpense ? 'home_expense' : f.category;
+        const isPartnerExpense = !isHomeExpense && (category === 'taher' || category === 'abdulqadir');
+
+        const { data: newTxn, error } = await insertTransactionWithId('EXP-' + f.date.replace(/-/g, ''), (txnId) => ({
+          transaction_id: txnId,
+          date: f.date,
+          type: isPartnerExpense ? 'partner_draw' : 'expense',
+          primary_mode: isHomeExpense && f.source === 'own_pocket' ? null : f.mode,
+          amount: amt,
+          category,
+          description: f.description || null,
+          notes: isHomeExpense ? `From ${f.source === 'own_pocket' ? 'Own Pocket' : 'Shop'}` : null,
+          partner_id: isPartnerExpense ? category : (isHomeExpense ? f.partnerId || null : null),
+          created_by: user?.username || null,
+        }));
+        if (error || !newTxn) { console.error(error); failedRows.push(originalIndex + 1); continue; }
+      }
+
+      setBulkForms(Array.from({ length: 10 }, () => ({ ...emptyBulkRow, date: todayStr() })));
+      setShowBulk(false);
+      fetchData();
+      triggerRefresh();
+      if (failedRows.length > 0) {
+        alert(`Row(s) ${failedRows.join(', ')} failed to save and were skipped. The rest were saved successfully.`);
+      }
+    } finally {
+      setBulkSaving(false);
+    }
+  }
+
   async function handleVoid(id: string, reason: string) {
     const txn = expenses.find((e) => e.id === id);
     if (!txn) return;
@@ -489,7 +559,7 @@ export default function Expenses() {
         {(['shop', 'home', 'partners', 'suppliers', 'loans'] as const).map((tab) => (
           <button
             key={tab}
-            onClick={() => { setActiveTab(tab); setShowAdd(false); setEditingId(null); }}
+            onClick={() => { setActiveTab(tab); setShowAdd(false); setEditingId(null); setShowBulk(false); }}
             className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
               activeTab === tab ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
             }`}
@@ -507,6 +577,14 @@ export default function Expenses() {
         >
           <Plus size={16} /> Add {activeTab === 'shop' ? 'Expense' : activeTab === 'home' ? 'Home Expense' : activeTab === 'partners' ? 'Partner Draw' : activeTab === 'suppliers' ? 'Supplier Payment' : 'Loan Payment'}
         </button>
+        {(activeTab === 'shop' || activeTab === 'home') && (
+          <button
+            onClick={() => { setShowBulk(true); setBulkForms(Array.from({ length: 10 }, () => ({ ...emptyBulkRow, date: todayStr() }))); }}
+            className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
+          >
+            <Plus size={16} /> Bulk Entry
+          </button>
+        )}
         {activeTab === 'shop' && (
           <button
             onClick={() => setShowCategoryManager(!showCategoryManager)}
@@ -771,6 +849,159 @@ export default function Expenses() {
                 Cancel
               </button>
             </div>
+          </div>
+        </div>
+        </div>
+      )}
+
+      {/* Bulk Entry - shop/home expenses only; suppliers/loans/partners payments each need a
+          picked record that doesn't fit a fast multi-row flow */}
+      {showBulk && (activeTab === 'shop' || activeTab === 'home') && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowBulk(false); }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-slate-800 text-sm">Bulk Entry - {activeTab === 'shop' ? 'Shop Expenses' : 'Home Expenses'}</h3>
+            <button onClick={() => setShowBulk(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
+          </div>
+          <div className="space-y-2">
+            {bulkForms.map((f, i) => (
+              <div key={i} className="border border-slate-200 rounded p-2">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-slate-500">#{i + 1}</span>
+                  {bulkForms.length > 1 && (
+                    <button
+                      onClick={() => setBulkForms(bulkForms.filter((_, idx) => idx !== i))}
+                      className="text-red-500 hover:text-red-700 text-xs"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-2">
+                  <input
+                    type="date"
+                    value={f.date}
+                    onChange={(e) => {
+                      const newForms = [...bulkForms];
+                      newForms[i] = { ...newForms[i], date: e.target.value };
+                      // Row 1's date drives every other row's date too - each
+                      // row can still be changed individually after that.
+                      if (i === 0) {
+                        for (let j = 1; j < newForms.length; j++) newForms[j] = { ...newForms[j], date: e.target.value };
+                      }
+                      setBulkForms(newForms);
+                    }}
+                    className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                  <input
+                    type="number"
+                    value={f.amount}
+                    onChange={(e) => {
+                      const newForms = [...bulkForms];
+                      newForms[i] = { ...newForms[i], amount: e.target.value };
+                      setBulkForms(newForms);
+                    }}
+                    placeholder="Amount"
+                    className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                  {activeTab === 'home' && f.source === 'own_pocket' ? (
+                    <div className="border border-slate-200 bg-slate-50 rounded px-2 py-1.5 text-xs text-slate-500 flex items-center">No mode - own money</div>
+                  ) : (
+                    <select
+                      value={f.mode}
+                      onChange={(e) => {
+                        const newForms = [...bulkForms];
+                        newForms[i] = { ...newForms[i], mode: e.target.value };
+                        setBulkForms(newForms);
+                      }}
+                      className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="mpesa">Mpesa</option>
+                      <option value="paybill">Paybill</option>
+                    </select>
+                  )}
+                </div>
+
+                {activeTab === 'shop' && (
+                  <select
+                    value={f.category}
+                    onChange={(e) => {
+                      const newForms = [...bulkForms];
+                      newForms[i] = { ...newForms[i], category: e.target.value };
+                      setBulkForms(newForms);
+                    }}
+                    className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm mb-2 focus:ring-2 focus:ring-emerald-500 outline-none"
+                  >
+                    <option value="">Category</option>
+                    {shopSelectableCategories.map((c) => <option key={c.id} value={c.name}>{c.name.replace('_', ' ')}</option>)}
+                  </select>
+                )}
+
+                {activeTab === 'home' && (
+                  <div className="grid grid-cols-2 gap-2 mb-2">
+                    <select
+                      value={f.partnerId}
+                      onChange={(e) => {
+                        const newForms = [...bulkForms];
+                        newForms[i] = { ...newForms[i], partnerId: e.target.value };
+                        setBulkForms(newForms);
+                      }}
+                      className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    >
+                      <option value="">Partner</option>
+                      <option value="taher">Taher</option>
+                      <option value="abdulqadir">Abdulqadir</option>
+                    </select>
+                    <select
+                      value={f.source}
+                      onChange={(e) => {
+                        const newForms = [...bulkForms];
+                        newForms[i] = { ...newForms[i], source: e.target.value as 'shop' | 'own_pocket' };
+                        setBulkForms(newForms);
+                      }}
+                      className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    >
+                      <option value="shop">From Shop</option>
+                      <option value="own_pocket">Own Pocket</option>
+                    </select>
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  value={f.description}
+                  onChange={(e) => {
+                    const newForms = [...bulkForms];
+                    newForms[i] = { ...newForms[i], description: e.target.value };
+                    setBulkForms(newForms);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && i === bulkForms.length - 1) {
+                      e.preventDefault();
+                      setBulkForms([...bulkForms, { ...emptyBulkRow, date: bulkForms[0]?.date || todayStr() }]);
+                    }
+                  }}
+                  placeholder="Description (optional)"
+                  className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-3 mt-3 pt-3 border-t border-slate-200">
+            <button
+              onClick={() => setBulkForms([...bulkForms, { ...emptyBulkRow, date: bulkForms[0]?.date || todayStr() }])}
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-1.5 rounded text-sm font-medium flex items-center gap-1"
+            >
+              <Plus size={14} /> Add Row
+            </button>
+            <button onClick={handleBulkSave} disabled={bulkSaving} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded text-sm font-medium">
+              {bulkSaving ? 'Saving...' : 'Save All'}
+            </button>
+            <button onClick={() => setShowBulk(false)} className="text-slate-500 hover:text-slate-700 text-sm">Cancel</button>
           </div>
         </div>
         </div>
