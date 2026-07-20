@@ -103,7 +103,7 @@ export default function Sales() {
   const [showQuickAddCostSupplier, setShowQuickAddCostSupplier] = useState(false);
   const [quickCostSupplier, setQuickCostSupplier] = useState({ name: '', phone: '' });
   const [refundingSale, setRefundingSale] = useState<Transaction | null>(null);
-  const [refundForm, setRefundForm] = useState({ amount: '', costPrice: '', mode: 'cash', date: todayStr() });
+  const [refundForm, setRefundForm] = useState({ amount: '', costPrice: '', profit: '', mode: 'cash', date: todayStr() });
   const [showDepositAdvance, setShowDepositAdvance] = useState(false);
   const [advanceDepositForm, setAdvanceDepositForm] = useState({ customerId: '', amount: '', date: todayStr(), mode: 'cash', notes: '' });
 
@@ -509,6 +509,49 @@ export default function Sales() {
     return Math.max(0, original - alreadyRefunded(sale));
   }
 
+  // Refund Amount/Cost Price/Profit auto-fill each other the same way the main
+  // Sales form does (Amount stands in for Selling Price here) - type any 2,
+  // the 3rd works itself out; whichever box you actually type into wins.
+  function refundFilled(v: string): boolean {
+    return v !== undefined && v !== null && v.trim() !== '';
+  }
+
+  function handleRefundAmountChange(value: string) {
+    const amt = parseFloat(value || '0');
+    setRefundForm((prev) => {
+      if (refundFilled(prev.costPrice)) {
+        return { ...prev, amount: value, profit: String(amt - parseFloat(prev.costPrice)) };
+      } else if (refundFilled(prev.profit)) {
+        return { ...prev, amount: value, costPrice: String(amt - parseFloat(prev.profit)) };
+      }
+      return { ...prev, amount: value };
+    });
+  }
+
+  function handleRefundCPChange(value: string) {
+    const cp = parseFloat(value || '0');
+    setRefundForm((prev) => {
+      if (refundFilled(prev.amount)) {
+        return { ...prev, costPrice: value, profit: String(parseFloat(prev.amount) - cp) };
+      } else if (refundFilled(prev.profit)) {
+        return { ...prev, costPrice: value, amount: String(cp + parseFloat(prev.profit)) };
+      }
+      return { ...prev, costPrice: value };
+    });
+  }
+
+  function handleRefundProfitChange(value: string) {
+    const profit = parseFloat(value || '0');
+    setRefundForm((prev) => {
+      if (refundFilled(prev.amount)) {
+        return { ...prev, profit: value, costPrice: String(parseFloat(prev.amount) - profit) };
+      } else if (refundFilled(prev.costPrice)) {
+        return { ...prev, profit: value, amount: String(parseFloat(prev.costPrice) + profit) };
+      }
+      return { ...prev, profit: value };
+    });
+  }
+
   async function handleRefund() {
     if (saving) return;
     if (!refundingSale) return;
@@ -601,7 +644,7 @@ export default function Sales() {
     }
 
     setRefundingSale(null);
-    setRefundForm({ amount: '', costPrice: '', mode: 'cash', date: todayStr() });
+    setRefundForm({ amount: '', costPrice: '', profit: '', mode: 'cash', date: todayStr() });
     fetchData();
     triggerRefresh();
     } finally {
@@ -1081,7 +1124,7 @@ export default function Sales() {
                                       <button
                                         onClick={() => {
                                           setRefundingSale(sale);
-                                          setRefundForm({ amount: '', costPrice: '', mode: 'cash', date: todayStr() });
+                                          setRefundForm({ amount: '', costPrice: '', profit: '', mode: 'cash', date: todayStr() });
                                         }}
                                         className="p-1 hover:bg-amber-100 rounded"
                                         title="Refund"
@@ -1205,9 +1248,21 @@ export default function Sales() {
                 <X size={16} />
               </button>
             </div>
-            <p className="text-xs text-slate-500">
-              Original sale: {formatKES(refundingSale.selling_price || 0)} (cost {formatKES(refundingSale.cost_price || 0)})
-            </p>
+            {/* Original sale, shown in full so you know exactly what you're refunding against */}
+            <div className="bg-slate-50 border border-slate-200 rounded p-2 grid grid-cols-3 gap-2 text-center">
+              <div>
+                <p className="text-xs text-slate-500">SP</p>
+                <p className="text-sm font-medium text-slate-800">{formatKES(refundingSale.selling_price || 0)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">CP</p>
+                <p className="text-sm font-medium text-slate-800">{formatKES(refundingSale.cost_price || 0)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500">Profit</p>
+                <p className="text-sm font-medium text-slate-800">{formatKES(saleProfit(refundingSale))}</p>
+              </div>
+            </div>
             <p className="text-xs text-slate-500">
               Refundable: KES {formatKES(refundableAmount(refundingSale))}
               {alreadyRefunded(refundingSale) > 0 && ` (KES ${formatKES(alreadyRefunded(refundingSale))} already refunded)`}
@@ -1222,19 +1277,34 @@ export default function Sales() {
               <input
                 type="number"
                 value={refundForm.amount}
-                onChange={(e) => setRefundForm({ ...refundForm, amount: e.target.value })}
+                onChange={(e) => handleRefundAmountChange(e.target.value)}
                 className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">Cost price of the refunded amount (optional - leave blank to work it out automatically)</label>
-              <input
-                type="number"
-                value={refundForm.costPrice}
-                onChange={(e) => setRefundForm({ ...refundForm, costPrice: e.target.value })}
-                placeholder="Auto-calculated if left blank"
-                className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-              />
+            {/* Cost Price and Profit auto-fill each other, same rule as the Sales form -
+                type one, the other works itself out; leave both blank for the automatic
+                proportional guess (same share of cost as the amount is of the original sale) */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Cost price (optional)</label>
+                <input
+                  type="number"
+                  value={refundForm.costPrice}
+                  onChange={(e) => handleRefundCPChange(e.target.value)}
+                  placeholder="Auto if left blank"
+                  className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">Profit (optional)</label>
+                <input
+                  type="number"
+                  value={refundForm.profit}
+                  onChange={(e) => handleRefundProfitChange(e.target.value)}
+                  placeholder="Auto if left blank"
+                  className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
             </div>
             <div className="grid grid-cols-2 gap-2">
               {['cash', 'mpesa', 'paybill', 'split'].includes(refundingSale.primary_mode || '') && (
