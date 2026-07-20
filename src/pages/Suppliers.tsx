@@ -76,6 +76,22 @@ const emptyPayment: PaymentForm = {
   transactionFee: '',
 };
 
+interface BulkPaymentRow {
+  supplierId: string;
+  amount: string;
+  date: string;
+  mode: string;
+  notes: string;
+}
+
+const emptyBulkPaymentRow: BulkPaymentRow = {
+  supplierId: '',
+  amount: '',
+  date: todayStr(),
+  mode: 'cash',
+  notes: '',
+};
+
 export default function Suppliers() {
   const { refreshKey, triggerRefresh } = useDataRefresh();
   const { user } = useAuth();
@@ -92,6 +108,9 @@ export default function Suppliers() {
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showLedger, setShowLedger] = useState(false);
+  const [showBulkPayment, setShowBulkPayment] = useState(false);
+  const [bulkPaymentForms, setBulkPaymentForms] = useState<BulkPaymentRow[]>(Array.from({ length: 10 }, () => ({ ...emptyBulkPaymentRow })));
+  const [bulkPaymentSaving, setBulkPaymentSaving] = useState(false);
   const [txnDatePreset, setTxnDatePreset] = useState<DatePreset>('month');
   const [txnCustomFrom, setTxnCustomFrom] = useState('');
   const [txnCustomTo, setTxnCustomTo] = useState('');
@@ -303,6 +322,51 @@ export default function Suppliers() {
     refreshSupplierData();
   }
 
+  // Unlike "Pay Supplier" above (one payment, to the currently-selected
+  // supplier), each row here picks its own supplier - for logging payments
+  // to many different suppliers in one sitting, e.g. catching up on real data.
+  async function handleBulkPaymentSave() {
+    if (bulkPaymentSaving) return;
+    const validForms = bulkPaymentForms
+      .map((f, originalIndex) => ({ f, originalIndex }))
+      .filter(({ f }) => f.supplierId && f.amount && parseFloat(f.amount) > 0);
+    if (validForms.length === 0) return;
+    setBulkPaymentSaving(true);
+    try {
+      const failedRows: number[] = [];
+
+      for (let i = 0; i < validForms.length; i++) {
+        const { f, originalIndex } = validForms[i];
+        const amt = parseFloat(f.amount);
+        const supplier = suppliers.find((s) => s.id === f.supplierId);
+        if (!supplier) { failedRows.push(originalIndex + 1); continue; }
+
+        const { data: newTxn, error } = await insertTransactionWithId('SUP-' + f.date.replace(/-/g, ''), (txnId) => ({
+          transaction_id: txnId,
+          date: f.date,
+          type: 'supplier_payment',
+          primary_mode: f.mode,
+          amount: amt,
+          supplier_id: f.supplierId,
+          description: `Payment to ${supplier.name}`,
+          notes: f.notes || null,
+          created_by: user?.username || null,
+        }));
+        if (error || !newTxn) { console.error(error); failedRows.push(originalIndex + 1); continue; }
+        await adjustSupplierBalance(f.supplierId, -amt);
+      }
+
+      setBulkPaymentForms(Array.from({ length: 10 }, () => ({ ...emptyBulkPaymentRow, date: todayStr() })));
+      setShowBulkPayment(false);
+      refreshSupplierData();
+      if (failedRows.length > 0) {
+        alert(`Row(s) ${failedRows.join(', ')} failed to save and were skipped. The rest were saved successfully.`);
+      }
+    } finally {
+      setBulkPaymentSaving(false);
+    }
+  }
+
   async function handleVoidTransaction(id: string) {
     const txn = transactions.find((t) => t.id === id);
     if (!txn) return;
@@ -359,6 +423,12 @@ export default function Suppliers() {
           className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
         >
           <Plus size={16} /> Add Supplier
+        </button>
+        <button
+          onClick={() => { setShowBulkPayment(true); setBulkPaymentForms(Array.from({ length: 10 }, () => ({ ...emptyBulkPaymentRow, date: todayStr() }))); }}
+          className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
+        >
+          <Plus size={16} /> Bulk Payments
         </button>
         <button
           onClick={() => setShowLedger(true)}
@@ -431,6 +501,123 @@ export default function Suppliers() {
               <button onClick={handleSaveSupplier} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded text-sm font-medium">Save</button>
               <button onClick={() => { setShowAdd(false); setEditingId(null); }} className="text-slate-500 hover:text-slate-700 text-sm">Cancel</button>
             </div>
+          </div>
+        </div>
+        </div>
+      )}
+
+      {/* Bulk Payments - each row picks its own supplier, for logging payments to many
+          different suppliers at once */}
+      {showBulkPayment && (
+        <div
+          className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowBulkPayment(false); }}
+        >
+        <div className="bg-white rounded-xl border border-slate-200 shadow-lg p-4 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-slate-800 text-sm">Bulk Payments to Suppliers</h3>
+            <button onClick={() => setShowBulkPayment(false)} className="p-1 hover:bg-slate-100 rounded"><X size={14} /></button>
+          </div>
+          <div className="space-y-2">
+            {bulkPaymentForms.map((f, i) => (
+              <div key={i} className="border border-slate-200 rounded p-2">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-slate-500">#{i + 1}</span>
+                  {bulkPaymentForms.length > 1 && (
+                    <button
+                      onClick={() => setBulkPaymentForms(bulkPaymentForms.filter((_, idx) => idx !== i))}
+                      className="text-red-500 hover:text-red-700 text-xs"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                  <select
+                    value={f.supplierId}
+                    onChange={(e) => {
+                      const newForms = [...bulkPaymentForms];
+                      newForms[i] = { ...newForms[i], supplierId: e.target.value };
+                      setBulkPaymentForms(newForms);
+                    }}
+                    className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                  >
+                    <option value="">Supplier</option>
+                    {sortSuppliersByBalance(suppliers).map((s) => <option key={s.id} value={s.id}>{s.name} ({formatKES(s.balance)})</option>)}
+                  </select>
+                  <input
+                    type="number"
+                    value={f.amount}
+                    onChange={(e) => {
+                      const newForms = [...bulkPaymentForms];
+                      newForms[i] = { ...newForms[i], amount: e.target.value };
+                      setBulkPaymentForms(newForms);
+                    }}
+                    placeholder="Amount"
+                    className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                  <input
+                    type="date"
+                    value={f.date}
+                    onChange={(e) => {
+                      const newForms = [...bulkPaymentForms];
+                      newForms[i] = { ...newForms[i], date: e.target.value };
+                      // Row 1's date drives every other row's date too - each
+                      // row can still be changed individually after that.
+                      if (i === 0) {
+                        for (let j = 1; j < newForms.length; j++) newForms[j] = { ...newForms[j], date: e.target.value };
+                      }
+                      setBulkPaymentForms(newForms);
+                    }}
+                    className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                  />
+                  <select
+                    value={f.mode}
+                    onChange={(e) => {
+                      const newForms = [...bulkPaymentForms];
+                      newForms[i] = { ...newForms[i], mode: e.target.value };
+                      setBulkPaymentForms(newForms);
+                    }}
+                    className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                  >
+                    <option value="cash">Cash</option>
+                    <option value="mpesa">Mpesa</option>
+                    <option value="paybill">Paybill</option>
+                  </select>
+                </div>
+                <input
+                  type="text"
+                  value={f.notes}
+                  onChange={(e) => {
+                    const newForms = [...bulkPaymentForms];
+                    newForms[i] = { ...newForms[i], notes: e.target.value };
+                    setBulkPaymentForms(newForms);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && i === bulkPaymentForms.length - 1) {
+                      e.preventDefault();
+                      setBulkPaymentForms([...bulkPaymentForms, { ...emptyBulkPaymentRow, date: bulkPaymentForms[0]?.date || todayStr() }]);
+                    }
+                  }}
+                  placeholder="Notes (optional)"
+                  className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-3 mt-3 pt-3 border-t border-slate-200">
+            <button
+              onClick={() => setBulkPaymentForms([...bulkPaymentForms, { ...emptyBulkPaymentRow, date: bulkPaymentForms[0]?.date || todayStr() }])}
+              className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-1.5 rounded text-sm font-medium flex items-center gap-1"
+            >
+              <Plus size={14} /> Add Row
+            </button>
+            <button onClick={handleBulkPaymentSave} disabled={bulkPaymentSaving} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded text-sm font-medium">
+              {bulkPaymentSaving ? 'Saving...' : 'Save All'}
+            </button>
+            <button onClick={() => setShowBulkPayment(false)} className="text-slate-500 hover:text-slate-700 text-sm">Cancel</button>
           </div>
         </div>
         </div>
