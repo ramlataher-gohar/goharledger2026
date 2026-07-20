@@ -82,6 +82,9 @@ interface BulkPaymentRow {
   date: string;
   mode: string;
   notes: string;
+  isPostDated: boolean;
+  clearsOn: string;
+  transactionFee: string;
 }
 
 const emptyBulkPaymentRow: BulkPaymentRow = {
@@ -90,6 +93,9 @@ const emptyBulkPaymentRow: BulkPaymentRow = {
   date: todayStr(),
   mode: 'cash',
   notes: '',
+  isPostDated: false,
+  clearsOn: '',
+  transactionFee: '',
 };
 
 export default function Suppliers() {
@@ -350,10 +356,12 @@ export default function Suppliers() {
           supplier_id: f.supplierId,
           description: `Payment to ${supplier.name}`,
           notes: f.notes || null,
+          clears_on: f.mode === 'paybill' && f.isPostDated && f.clearsOn ? f.clearsOn : null,
           created_by: user?.username || null,
         }));
         if (error || !newTxn) { console.error(error); failedRows.push(originalIndex + 1); continue; }
         await adjustSupplierBalance(f.supplierId, -amt);
+        await insertTransactionFee(f.date, f.mode, f.transactionFee, supplier.name);
       }
 
       setBulkPaymentForms(Array.from({ length: 10 }, () => ({ ...emptyBulkPaymentRow, date: todayStr() })));
@@ -596,14 +604,65 @@ export default function Suppliers() {
                     setBulkPaymentForms(newForms);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && i === bulkPaymentForms.length - 1) {
+                    if (e.key === 'Enter' && !f.isPostDated && i === bulkPaymentForms.length - 1) {
                       e.preventDefault();
                       setBulkPaymentForms([...bulkPaymentForms, { ...emptyBulkPaymentRow, date: bulkPaymentForms[0]?.date || todayStr() }]);
                     }
                   }}
                   placeholder="Notes (optional)"
-                  className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                  className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none mb-2"
                 />
+
+                {/* Transaction fee (Mpesa/Paybill only lose money to network fees) */}
+                {(f.mode === 'mpesa' || f.mode === 'paybill') && (
+                  <input
+                    type="number"
+                    value={f.transactionFee}
+                    onChange={(e) => {
+                      const newForms = [...bulkPaymentForms];
+                      newForms[i] = { ...newForms[i], transactionFee: e.target.value };
+                      setBulkPaymentForms(newForms);
+                    }}
+                    placeholder="Transaction fee (optional)"
+                    className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none mb-2"
+                  />
+                )}
+
+                {/* Post-dated cheque (only makes sense for Paybill/Bank) */}
+                {f.mode === 'paybill' && (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={f.isPostDated}
+                      onChange={(e) => {
+                        const newForms = [...bulkPaymentForms];
+                        newForms[i] = { ...newForms[i], isPostDated: e.target.checked };
+                        setBulkPaymentForms(newForms);
+                      }}
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <label className="text-xs text-slate-600">Post-dated cheque</label>
+                    {f.isPostDated && (
+                      <input
+                        type="date"
+                        value={f.clearsOn}
+                        onChange={(e) => {
+                          const newForms = [...bulkPaymentForms];
+                          newForms[i] = { ...newForms[i], clearsOn: e.target.value };
+                          setBulkPaymentForms(newForms);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && i === bulkPaymentForms.length - 1) {
+                            e.preventDefault();
+                            setBulkPaymentForms([...bulkPaymentForms, { ...emptyBulkPaymentRow, date: bulkPaymentForms[0]?.date || todayStr() }]);
+                          }
+                        }}
+                        className="flex-1 border border-slate-300 rounded px-2 py-1 text-xs"
+                        placeholder="Clears on"
+                      />
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
