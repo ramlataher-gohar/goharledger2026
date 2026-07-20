@@ -94,6 +94,7 @@ export default function Sales() {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
+  const [highlightedSaleId, setHighlightedSaleId] = useState<string | null>(null);
   const [showLedger, setShowLedger] = useState(false);
   const [showQuickAddCustomer, setShowQuickAddCustomer] = useState(false);
   const [showQuickAddSupplier, setShowQuickAddSupplier] = useState(false);
@@ -750,6 +751,31 @@ export default function Sales() {
 
   const sortedDates = Array.from(grouped.keys()).sort((a, b) => b.localeCompare(a));
 
+  // Only rows currently visible (their date group expanded) can be browsed
+  // with arrow keys - a collapsed group has nothing on screen to move into.
+  const visibleSales = sortedDates.filter((d) => expandedDates.has(d)).flatMap((d) => grouped.get(d) || []);
+
+  const handleListKeyDown = (e: React.KeyboardEvent) => {
+    if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return;
+    if (visibleSales.length === 0) return;
+    e.preventDefault();
+
+    if (e.key === 'Enter') {
+      const current = visibleSales.find((s) => s.id === highlightedSaleId);
+      if (current) startEdit(current);
+      return;
+    }
+
+    const currentIdx = visibleSales.findIndex((s) => s.id === highlightedSaleId);
+    if (e.key === 'ArrowDown') {
+      const next = currentIdx < 0 ? 0 : Math.min(currentIdx + 1, visibleSales.length - 1);
+      setHighlightedSaleId(visibleSales[next].id);
+    } else if (e.key === 'ArrowUp') {
+      const prev = currentIdx < 0 ? 0 : Math.max(currentIdx - 1, 0);
+      setHighlightedSaleId(visibleSales[prev].id);
+    }
+  };
+
   return (
     <div className="space-y-4">
       {/* Header actions */}
@@ -859,24 +885,12 @@ export default function Sales() {
             setQuickCostSupplier={setQuickCostSupplier}
             onQuickAddCostSupplier={handleQuickAddCostSupplier}
             isEditing={!!editingId}
-            onKeyDown={(e, field) => {
+            onKeyDown={(e) => {
+              // SaleFormFields only hands off here once focus reaches the
+              // very last box and Enter is pressed - everything before that
+              // is arrow/Enter navigation it already handled itself.
               if (e.key === 'Enter') {
-                const fields: (keyof SaleForm)[] = ['date', 'mode', 'customerId', 'supplierId', 'sellingPrice', 'costPrice', 'commission', 'notes'];
-                const idx = fields.indexOf(field);
-                if (idx < fields.length - 1) {
-                  // Focus next input (handled by DOM traversal)
-                  const formEl = (e.target as HTMLElement).closest('form');
-                  if (formEl) {
-                    const inputs = formEl.querySelectorAll('input, select');
-                    const currentIdx = Array.from(inputs).indexOf(e.target as HTMLInputElement);
-                    if (currentIdx < inputs.length - 1) {
-                      (inputs[currentIdx + 1] as HTMLElement).focus();
-                    }
-                  }
-                } else {
-                  // Last field - save
-                  (editingId ? handleUpdate : handleSave)();
-                }
+                (editingId ? handleUpdate : handleSave)();
               }
             }}
           />
@@ -931,16 +945,11 @@ export default function Sales() {
                   onCancel={() => {}}
                   saveLabel=""
                   hideActions
-                  onKeyDown={(e, field) => {
-                    if (e.key === 'Enter') {
-                      const fields: (keyof SaleForm)[] = ['date', 'mode', 'customerId', 'supplierId', 'sellingPrice', 'costPrice', 'commission', 'notes'];
-                      const idx = fields.indexOf(field);
-                      if (idx === fields.length - 1) {
-                        // Last field - add new row or save
-                        if (i === bulkForms.length - 1) {
-                          setBulkForms([...bulkForms, { ...emptyForm, date: bulkForms[0]?.date || todayStr() }]);
-                        }
-                      }
+                  onKeyDown={(e) => {
+                    // Reaches here only once focus is on this row's very
+                    // last box and Enter is pressed - move on to a new row.
+                    if (e.key === 'Enter' && i === bulkForms.length - 1) {
+                      setBulkForms([...bulkForms, { ...emptyForm, date: bulkForms[0]?.date || todayStr() }]);
                     }
                   }}
                 />
@@ -964,8 +973,12 @@ export default function Sales() {
         </div>
       )}
 
-      {/* Sales List */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+      {/* Sales List - click anywhere in here, then use Up/Down to browse entries, Enter to edit the highlighted one */}
+      <div
+        className="bg-white rounded-xl border border-slate-200 shadow-sm outline-none"
+        tabIndex={0}
+        onKeyDown={handleListKeyDown}
+      >
         {loading ? (
           <div className="p-8 text-center text-slate-400">Loading...</div>
         ) : sortedDates.length === 0 ? (
@@ -1013,7 +1026,11 @@ export default function Sales() {
                             const profit = saleProfit(sale);
                             const incomplete = isSaleIncomplete(sale);
                             return (
-                              <tr key={sale.id} className={`hover:bg-white transition-colors ${incomplete ? 'bg-green-50' : ''}`} title={incomplete ? 'Missing payment mode, cost price, or selling price' : undefined}>
+                              <tr
+                                key={sale.id}
+                                className={`hover:bg-white transition-colors ${sale.id === highlightedSaleId ? 'bg-emerald-100' : incomplete ? 'bg-green-50' : ''}`}
+                                title={incomplete ? 'Missing payment mode, cost price, or selling price' : undefined}
+                              >
                                 <td className="px-4 py-2 font-mono text-xs text-slate-500">{sale.transaction_id}</td>
                                 <td className="px-4 py-2">
                                   <span className={`text-xs px-2 py-0.5 rounded-full ${
@@ -1367,15 +1384,37 @@ function SaleFormFields({
     });
   };
 
+  // Arrow keys move between boxes instead of needing the mouse - Down/Right
+  // go to the next box, Up/Left to the previous one, scoped to just this
+  // form (so Bulk Entry's rows don't jump into each other). Enter does the
+  // same going forward, and once it reaches the last box, hands off to
+  // whatever the parent wants to happen next (save, or add a new row).
   const handleKeyDown = (e: React.KeyboardEvent, field: keyof SaleForm) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      onKeyDown?.(e, field);
+    const forward = e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowRight';
+    const backward = e.key === 'ArrowUp' || e.key === 'ArrowLeft';
+    if (!forward && !backward) return;
+
+    const target = e.target as HTMLElement;
+    const scope = target.closest('[data-sale-form]');
+    if (!scope) return;
+    const inputs = Array.from(scope.querySelectorAll('input, select')) as HTMLElement[];
+    const currentIdx = inputs.indexOf(target);
+    if (currentIdx === -1) return;
+
+    e.preventDefault();
+    if (forward) {
+      if (currentIdx < inputs.length - 1) {
+        inputs[currentIdx + 1].focus();
+      } else if (e.key === 'Enter') {
+        onKeyDown?.(e, field);
+      }
+    } else if (currentIdx > 0) {
+      inputs[currentIdx - 1].focus();
     }
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-sale-form>
       {/* Row 1: Date, Mode, Customer/Supplier */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <input
