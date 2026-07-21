@@ -10,6 +10,7 @@ import {
   ChevronRight,
   Settings,
   BookOpen,
+  UserPlus,
 } from 'lucide-react';
 import { supabase } from '../utils/supabase';
 import { formatKES, formatDate, todayStr } from '../utils/format';
@@ -134,6 +135,10 @@ export default function Expenses() {
   const [showBulkSupplier, setShowBulkSupplier] = usePersistentState('expenses.showBulkSupplier', false);
   const [bulkSupplierForms, setBulkSupplierForms] = usePersistentState<BulkSupplierPaymentRow[]>('expenses.bulkSupplierForms', () => Array.from({ length: 10 }, () => ({ ...emptyBulkSupplierRow })));
   const [bulkSupplierSaving, setBulkSupplierSaving] = useState(false);
+  const [showQuickAddSupplier, setShowQuickAddSupplier] = useState(false);
+  const [quickSupplier, setQuickSupplier] = useState({ name: '', phone: '', balance: '' });
+  // Which Bulk Payments row has its quick-add mini-form open (null = none)
+  const [bulkQuickAddSupplierRow, setBulkQuickAddSupplierRow] = useState<number | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -200,6 +205,79 @@ export default function Expenses() {
       description: `Transaction fee - ${relatedTo}`,
       created_by: user?.username || null,
     }));
+  }
+
+  async function handleQuickAddSupplier() {
+    const name = quickSupplier.name.trim();
+    if (!name) return;
+    if (suppliers.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+      alert('A supplier with this name already exists.');
+      return;
+    }
+    const openingBalance = parseFloat(quickSupplier.balance || '0');
+    const { data } = await supabase.from('suppliers').insert({
+      name,
+      phone: quickSupplier.phone || null,
+      balance: openingBalance,
+    }).select().single();
+    if (data) {
+      if (openingBalance !== 0) {
+        await supabase.from('transactions').insert({
+          transaction_id: `OPN-BAL-${data.id}`,
+          date: todayStr(),
+          type: 'supplier_invoice',
+          primary_mode: null,
+          amount: openingBalance,
+          supplier_id: data.id,
+          description: `Opening balance - ${data.name}`,
+          created_by: user?.username || null,
+        });
+      }
+      setSuppliers((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      setForm((f) => ({ ...f, supplierId: data.id }));
+      setShowQuickAddSupplier(false);
+      setQuickSupplier({ name: '', phone: '', balance: '' });
+    }
+  }
+
+  // Same as the quick-add above, but for one specific Bulk Payments row instead
+  // of the single Add form - the new supplier still becomes available to every
+  // other row's dropdown right away too.
+  async function handleBulkQuickAddSupplier(rowIndex: number) {
+    const name = quickSupplier.name.trim();
+    if (!name) return;
+    if (suppliers.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+      alert('A supplier with this name already exists.');
+      return;
+    }
+    const openingBalance = parseFloat(quickSupplier.balance || '0');
+    const { data } = await supabase.from('suppliers').insert({
+      name,
+      phone: quickSupplier.phone || null,
+      balance: openingBalance,
+    }).select().single();
+    if (data) {
+      if (openingBalance !== 0) {
+        await supabase.from('transactions').insert({
+          transaction_id: `OPN-BAL-${data.id}`,
+          date: todayStr(),
+          type: 'supplier_invoice',
+          primary_mode: null,
+          amount: openingBalance,
+          supplier_id: data.id,
+          description: `Opening balance - ${data.name}`,
+          created_by: user?.username || null,
+        });
+      }
+      setSuppliers((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      setBulkSupplierForms((prev) => {
+        const next = [...prev];
+        next[rowIndex] = { ...next[rowIndex], supplierId: data.id };
+        return next;
+      });
+      setBulkQuickAddSupplierRow(null);
+      setQuickSupplier({ name: '', phone: '', balance: '' });
+    }
   }
 
   async function handleSaveCategory() {
@@ -910,15 +988,60 @@ export default function Expenses() {
             )}
 
             {activeTab === 'suppliers' && (
-              <select
-                value={form.supplierId}
-                onChange={(e) => setForm({ ...form, supplierId: e.target.value })}
-                onKeyDown={(e) => handleFormKeyNav(e)}
-                className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-              >
-                <option value="">Supplier</option>
-                {sortSuppliersByBalance(suppliers).map((s) => <option key={s.id} value={s.id}>{s.name} ({formatKES(s.balance)})</option>)}
-              </select>
+              <div className="flex gap-1">
+                <select
+                  value={form.supplierId}
+                  onChange={(e) => setForm({ ...form, supplierId: e.target.value })}
+                  onKeyDown={(e) => handleFormKeyNav(e)}
+                  className="flex-1 border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                >
+                  <option value="">Supplier</option>
+                  {sortSuppliersByBalance(suppliers).map((s) => <option key={s.id} value={s.id}>{s.name} ({formatKES(s.balance)})</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setShowQuickAddSupplier(!showQuickAddSupplier)}
+                  className="p-1.5 border border-slate-300 rounded hover:bg-slate-50 shrink-0"
+                  title="Add new supplier"
+                >
+                  <UserPlus size={16} className="text-slate-500" />
+                </button>
+              </div>
+            )}
+
+            {/* Inline quick-add supplier */}
+            {activeTab === 'suppliers' && showQuickAddSupplier && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-emerald-50 border border-emerald-200 rounded p-2">
+                <input
+                  type="text"
+                  value={quickSupplier.name}
+                  onChange={(e) => setQuickSupplier({ ...quickSupplier, name: e.target.value })}
+                  placeholder="New supplier name"
+                  className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+                <input
+                  type="text"
+                  value={quickSupplier.phone}
+                  onChange={(e) => setQuickSupplier({ ...quickSupplier, phone: e.target.value })}
+                  placeholder="Phone (optional)"
+                  className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+                <input
+                  type="number"
+                  value={quickSupplier.balance}
+                  onChange={(e) => setQuickSupplier({ ...quickSupplier, balance: e.target.value })}
+                  placeholder="Opening balance (optional)"
+                  className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                />
+                <div className="flex gap-1">
+                  <button type="button" onClick={handleQuickAddSupplier} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded text-xs font-medium">
+                    Add
+                  </button>
+                  <button type="button" onClick={() => setShowQuickAddSupplier(false)} className="text-slate-500 hover:text-slate-700 text-xs">
+                    Cancel
+                  </button>
+                </div>
+              </div>
             )}
 
             {/* Description */}
@@ -1190,19 +1313,29 @@ export default function Expenses() {
                   )}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                  <select
-                    value={f.supplierId}
-                    onChange={(e) => {
-                      const newForms = [...bulkSupplierForms];
-                      newForms[i] = { ...newForms[i], supplierId: e.target.value };
-                      setBulkSupplierForms(newForms);
-                    }}
-                    onKeyDown={(e) => handleFormKeyNav(e, addBulkSupplierRow)}
-                    className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-                  >
-                    <option value="">Supplier</option>
-                    {sortSuppliersByBalance(suppliers).map((s) => <option key={s.id} value={s.id}>{s.name} ({formatKES(s.balance)})</option>)}
-                  </select>
+                  <div className="flex gap-1">
+                    <select
+                      value={f.supplierId}
+                      onChange={(e) => {
+                        const newForms = [...bulkSupplierForms];
+                        newForms[i] = { ...newForms[i], supplierId: e.target.value };
+                        setBulkSupplierForms(newForms);
+                      }}
+                      onKeyDown={(e) => handleFormKeyNav(e, addBulkSupplierRow)}
+                      className="flex-1 border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    >
+                      <option value="">Supplier</option>
+                      {sortSuppliersByBalance(suppliers).map((s) => <option key={s.id} value={s.id}>{s.name} ({formatKES(s.balance)})</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => setBulkQuickAddSupplierRow(bulkQuickAddSupplierRow === i ? null : i)}
+                      className="p-1.5 border border-slate-300 rounded hover:bg-slate-50 shrink-0"
+                      title="Add new supplier"
+                    >
+                      <UserPlus size={16} className="text-slate-500" />
+                    </button>
+                  </div>
                   <input
                     type="number"
                     value={f.amount}
@@ -1216,6 +1349,41 @@ export default function Expenses() {
                     className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                 </div>
+
+                {/* Inline quick-add supplier, this row only */}
+                {bulkQuickAddSupplierRow === i && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-emerald-50 border border-emerald-200 rounded p-2 mb-2">
+                    <input
+                      type="text"
+                      value={quickSupplier.name}
+                      onChange={(e) => setQuickSupplier({ ...quickSupplier, name: e.target.value })}
+                      placeholder="New supplier name"
+                      className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={quickSupplier.phone}
+                      onChange={(e) => setQuickSupplier({ ...quickSupplier, phone: e.target.value })}
+                      placeholder="Phone (optional)"
+                      className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    <input
+                      type="number"
+                      value={quickSupplier.balance}
+                      onChange={(e) => setQuickSupplier({ ...quickSupplier, balance: e.target.value })}
+                      placeholder="Opening balance (optional)"
+                      className="border border-slate-300 rounded px-2 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                    />
+                    <div className="flex gap-1">
+                      <button type="button" onClick={() => handleBulkQuickAddSupplier(i)} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded text-xs font-medium">
+                        Add
+                      </button>
+                      <button type="button" onClick={() => setBulkQuickAddSupplierRow(null)} className="text-slate-500 hover:text-slate-700 text-xs">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
                   <input
                     type="date"
