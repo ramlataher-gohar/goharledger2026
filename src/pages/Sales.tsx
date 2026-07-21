@@ -20,6 +20,8 @@ import { insertTransactionWithId } from '../utils/transactionId';
 import { fetchAllRows } from '../utils/fetchAll';
 import { adjustCustomerCredit, adjustCustomerAdvance, adjustSupplierBalance } from '../utils/balances';
 import { syncCommissionExpense, voidCommissionExpense } from '../utils/commissionExpense';
+import { parseSmartEntryText, parsePayments, detectCommission } from '../utils/smartEntryParser';
+import { findBestMatch } from '../utils/fuzzyMatch';
 import { useDataRefresh } from '../context/DataContext';
 import { useAuth } from '../context/AuthContext';
 import { usePersistentState } from '../context/PageStateContext';
@@ -51,6 +53,27 @@ interface SaleForm {
   costSupplierId: string;
   costSupplierAmount: string;
   costSupplierMode: string;
+  // Only set on rows that came from Smart Entry and still have something
+  // worth a second look before saving - never set on a normally-typed row.
+  smartFlags?: string[];
+}
+
+interface SmartPreviewRow {
+  posId: string | null;
+  date: string;
+  sellingPrice: number;
+  costPrice: number;
+  profit: number;
+  commission: number;
+  mode: SaleMode;
+  customerId: string;
+  customerMatchName: string;
+  splitMpesa: number;
+  splitCash: number;
+  splitPaybill: number;
+  notes: string;
+  flags: string[];
+  duplicate: boolean;
 }
 
 const emptyForm: SaleForm = {
@@ -113,6 +136,9 @@ export default function Sales() {
   const [refundForm, setRefundForm] = usePersistentState('sales.refundForm', { amount: '', costPrice: '', profit: '', mode: 'cash', date: todayStr() });
   const [showDepositAdvance, setShowDepositAdvance] = usePersistentState('sales.showDepositAdvance', false);
   const [advanceDepositForm, setAdvanceDepositForm] = usePersistentState('sales.advanceDepositForm', { customerId: '', amount: '', date: todayStr(), mode: 'cash', notes: '' });
+  const [showSmartEntry, setShowSmartEntry] = usePersistentState('sales.showSmartEntry', false);
+  const [smartEntryPaste, setSmartEntryPaste] = usePersistentState('sales.smartEntryPaste', '');
+  const [smartEntryPreview, setSmartEntryPreview] = usePersistentState<SmartPreviewRow[]>('sales.smartEntryPreview', () => []);
 
   useEffect(() => {
     fetchData();
@@ -544,6 +570,123 @@ export default function Sales() {
     }
   }
 
+  // Turns a paste from an external sales export into preview rows: reverses
+  // any "LESS ### CMSN" commission netted out of the source's own Total,
+  // works out Cash/Mpesa/Paybill/Credit/Split from the Payment Type text,
+  // fuzzy-matches a "Sold To" name against existing customers, and checks
+  // the source's own Sale ID against already-saved sales so a re-paste of
+  // the same rows gets skipped instead of silently duplicated.
+  function handleSmartEntryParse() {
+    const parsed = parseSmartEntryText(smartEntryPaste);
+    const preview: SmartPreviewRow[] = parsed.map((r) => {
+      const flags: string[] = [];
+      let sellingPrice = r.total;
+      let commission = 0;
+      const cm = detectCommission(r.comments);
+      if (cm) {
+        if (cm.confident) {
+          commission = cm.amount;
+          sellingPrice = r.total + cm.amount;
+        } else {
+          flags.push(`Comment mentions "LESS ${cm.amount.toLocaleString()}" without confirming it's commission - check if Selling Price/Commission should change.`);
+        }
+      }
+
+      const payments = parsePayments(r.paymentTypeStr);
+      let mode: SaleMode = 'cash';
+      let splitMpesa = 0, splitCash = 0, splitPaybill = 0;
+      let customerId = '';
+      let customerMatchName = '';
+
+      if (r.soldTo) {
+        mode = 'credit';
+        const match = findBestMatch(r.soldTo, customers, (c) => c.name);
+        if (match) {
+          customerId = match.item.id;
+          customerMatchName = match.item.name;
+          flags.push(`Matched customer "${r.soldTo}" to "${match.item.name}" - please confirm this is the right customer.`);
+        } else {
+          flags.push(`Sold To "${r.soldTo}" - no matching customer found. Pick one or quick-add it.`);
+        }
+      } else if (payments.length > 1) {
+        mode = 'split';
+        for (const p of payments) {
+          if (p.mode === 'mpesa') splitMpesa += p.amount;
+          else if (p.mode === 'cash') splitCash += p.amount;
+          else if (p.mode === 'paybill') splitPaybill += p.amount;
+          else flags.push(`Could not recognise payment method "${p.label}".`);
+        }
+        if (commission > 0) {
+          // The split amounts summed to the source's smaller (post-commission)
+          // Total. Bump the largest bucket so the split still adds up to the
+          // corrected Selling Price - which wallet really covered the
+          // commission is a guess, so it's flagged either way.
+          const buckets: Array<['mpesa' | 'cash' | 'paybill', number]> = [
+            ['mpesa', splitMpesa], ['cash', splitCash], ['paybill', splitPaybill],
+          ];
+          buckets.sort((a, b) => b[1] - a[1]);
+          const biggest = buckets[0][0];
+          if (biggest === 'mpesa') splitMpesa += commission;
+          else if (biggest === 'cash') splitCash += commission;
+          else splitPaybill += commission;
+          flags.push(`Added the KES ${commission.toLocaleString()} commission into the ${biggest} split amount as a guess - check which wallet it really came from.`);
+        }
+      } else if (payments.length === 1) {
+        mode = payments[0].mode || 'cash';
+        if (!payments[0].mode) flags.push(`Could not recognise payment method "${payments[0].label}" - defaulted to Cash.`);
+      } else {
+        flags.push('No payment method found in the paste - defaulted to Cash.');
+      }
+
+      if (commission > 0) flags.push("Source doesn't say which wallet paid the commission - Commission Mode needs picking.");
+
+      const posTag = r.posId ? `[POS #${r.posId}] ` : '';
+      const duplicate = !!r.posId && sales.some((s) => !s.is_void && s.notes?.includes(`[POS #${r.posId}]`));
+
+      return {
+        posId: r.posId,
+        date: r.date,
+        sellingPrice,
+        costPrice: r.costOfGoods,
+        profit: sellingPrice - r.costOfGoods,
+        commission,
+        mode,
+        customerId,
+        customerMatchName,
+        splitMpesa, splitCash, splitPaybill,
+        notes: (posTag + r.comments).trim(),
+        flags,
+        duplicate,
+      };
+    });
+    setSmartEntryPreview(preview);
+  }
+
+  function handleAddSmartEntryToBulk() {
+    const toAdd = smartEntryPreview.filter((r) => !r.duplicate);
+    const forms: SaleForm[] = toAdd.map((r) => ({
+      ...emptyForm,
+      date: r.date,
+      mode: r.mode,
+      sellingPrice: r.sellingPrice ? String(r.sellingPrice) : '',
+      costPrice: r.costPrice ? String(r.costPrice) : '',
+      profit: String(r.profit),
+      commission: r.commission ? String(r.commission) : '',
+      customerId: r.customerId,
+      splitMpesa: r.splitMpesa ? String(r.splitMpesa) : '',
+      splitCash: r.splitCash ? String(r.splitCash) : '',
+      splitPaybill: r.splitPaybill ? String(r.splitPaybill) : '',
+      notes: r.notes,
+      smartFlags: r.flags,
+    }));
+    if (forms.length === 0) return;
+    setBulkForms(forms);
+    setShowBulk(true);
+    setShowSmartEntry(false);
+    setSmartEntryPreview([]);
+    setSmartEntryPaste('');
+  }
+
   async function handleVoid(id: string, reason: string) {
     const txn = sales.find((s) => s.id === id);
     if (!txn) return;
@@ -925,10 +1068,16 @@ export default function Sales() {
           <Plus size={16} /> Add Sale
         </button>
         <button
-          onClick={() => { setShowBulk(true); setShowAdd(false); setEditingId(null); setBulkForms(Array.from({ length: 10 }, () => ({ ...emptyForm, date: todayStr() }))); }}
+          onClick={() => { setShowBulk(true); setShowAdd(false); setShowSmartEntry(false); setEditingId(null); setBulkForms(Array.from({ length: 10 }, () => ({ ...emptyForm, date: todayStr() }))); }}
           className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
         >
           <Plus size={16} /> Bulk Entry
+        </button>
+        <button
+          onClick={() => { setShowSmartEntry(true); setShowAdd(false); setShowBulk(false); setEditingId(null); }}
+          className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors"
+        >
+          <Plus size={16} /> Smart Entry
         </button>
         <button
           onClick={() => setShowLedger(true)}
@@ -1040,6 +1189,93 @@ export default function Sales() {
         </div>
       )}
 
+      {/* Smart Entry - paste a sales export from elsewhere, review the parsed
+          rows here, then hand them to Bulk Entry (already filled in) for the
+          real editing and Save All - its own tab, not mixed into Bulk Entry. */}
+      {showSmartEntry && (
+        <div
+          className="bg-white rounded-xl border border-slate-200 shadow-lg p-4"
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowSmartEntry(false); }}
+        >
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-slate-800">Smart Entry</h3>
+            <button onClick={() => setShowSmartEntry(false)} className="p-1 hover:bg-slate-100 rounded">
+              <X size={16} />
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mb-2">
+            Paste rows copied from another sales sheet or system. This reads them and works out Date, Selling Price, Cost Price, Commission, and Mode for you - nothing is saved until you send them to Bulk Entry and press Save All there.
+          </p>
+          <textarea
+            value={smartEntryPaste}
+            onChange={(e) => setSmartEntryPaste(e.target.value)}
+            placeholder="Paste your sales export here..."
+            rows={8}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 outline-none"
+          />
+          <div className="flex items-center gap-3 mt-2">
+            <button
+              onClick={handleSmartEntryParse}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded text-sm font-medium"
+            >
+              Parse pasted rows
+            </button>
+            <button
+              onClick={() => { setSmartEntryPaste(''); setSmartEntryPreview([]); }}
+              className="text-slate-500 hover:text-slate-700 text-sm"
+            >
+              Clear
+            </button>
+            {smartEntryPreview.length > 0 && (
+              <span className="text-xs text-slate-500 ml-auto">
+                {smartEntryPreview.length} parsed
+                {smartEntryPreview.some((r) => r.flags.length > 0) && `, ${smartEntryPreview.filter((r) => r.flags.length > 0).length} need a check`}
+                {smartEntryPreview.some((r) => r.duplicate) && `, ${smartEntryPreview.filter((r) => r.duplicate).length} already imported (skipped)`}
+              </span>
+            )}
+          </div>
+
+          {smartEntryPreview.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-slate-200 space-y-2 max-h-96 overflow-y-auto">
+              {smartEntryPreview.map((r, i) => (
+                <div
+                  key={i}
+                  className={`border rounded p-2 text-xs ${r.duplicate ? 'border-slate-200 bg-slate-50 opacity-60' : r.flags.length > 0 ? 'border-amber-300 bg-amber-50' : 'border-slate-200'}`}
+                >
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className="font-medium text-slate-700">{r.date}</span>
+                    <span className="text-slate-500">SP {formatKES(r.sellingPrice)}</span>
+                    <span className="text-slate-500">CP {formatKES(r.costPrice)}</span>
+                    <span className="text-slate-500">Profit {formatKES(r.profit)}</span>
+                    {r.commission > 0 && <span className="text-slate-500">Commission {formatKES(r.commission)}</span>}
+                    <span className="px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-700 capitalize">{r.mode}</span>
+                    {r.customerMatchName && <span className="text-slate-500">→ {r.customerMatchName}</span>}
+                    {r.duplicate && <span className="px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600">Already imported</span>}
+                  </div>
+                  {r.flags.length > 0 && (
+                    <ul className="text-amber-700 list-disc list-inside space-y-0.5">
+                      {r.flags.map((f, fi) => <li key={fi}>{f}</li>)}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {smartEntryPreview.length > 0 && (
+            <div className="flex gap-3 mt-3 pt-3 border-t border-slate-200">
+              <button
+                onClick={handleAddSmartEntryToBulk}
+                disabled={smartEntryPreview.every((r) => r.duplicate)}
+                className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded text-sm font-medium"
+              >
+                Add to Bulk Entry →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Bulk entry - one shared data-sale-form scope across all rows, so arrow keys/Enter
           flow straight from one row's last box into the next row's first box */}
       {showBulk && (
@@ -1056,7 +1292,7 @@ export default function Sales() {
           </div>
           <div className="space-y-2">
             {bulkForms.map((f, i) => (
-              <div key={i} className="border border-slate-200 rounded p-2">
+              <div key={i} className={`border rounded p-2 ${f.smartFlags?.length ? 'border-amber-300 bg-amber-50' : 'border-slate-200'}`}>
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-slate-500">#{i + 1}</span>
                   {bulkForms.length > 1 && (
@@ -1071,6 +1307,11 @@ export default function Sales() {
                     </button>
                   )}
                 </div>
+                {f.smartFlags && f.smartFlags.length > 0 && (
+                  <ul className="text-xs text-amber-700 list-disc list-inside mb-2 space-y-0.5">
+                    {f.smartFlags.map((flag, fi) => <li key={fi}>{flag}</li>)}
+                  </ul>
+                )}
                 <SaleFormFields
                   form={f}
                   setForm={(updater) => {
